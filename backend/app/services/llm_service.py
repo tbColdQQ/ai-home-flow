@@ -6,28 +6,6 @@ from typing import Any
 from app.core.config import settings
 
 
-INTENT_PROMPT = """
-You are the intent parser for home-flow, a Chinese second-hand housing transaction QA system.
-Return JSON only. Do not generate SQL.
-
-Database fields:
-city, area, street, residential, acreage, list_price, price, agent, store,
-signing_date, CA, maintainor, parking, status, location, brand.
-
-Output JSON:
-{
-  "metric": "count|total_price|avg_total_price|avg_unit_price|ranking|detail",
-  "date_range": "today|this_month|this_year|none",
-  "residential": null,
-  "store": null,
-  "agent": null,
-  "area": null,
-  "group_by": null,
-  "chart": false
-}
-""".strip()
-
-
 SQL_PROMPT = """
 You are the SQL generator for home-flow.
 Return JSON only. Do not add explanations.
@@ -44,13 +22,13 @@ Important data rules:
 - signing_date is stored as text in yyyy-mm-dd or yyyy-mm-dd HH:MM:SS style.
 - price is stored in yuan.
 - acreage is square meters.
-- For a Chinese month like "2026年6月", use signing_date >= "2026-06-01" AND signing_date < "2026-07-01".
+- For a Chinese month like "2026年6月" or "2026年6月份", use signing_date >= "2026-06-01" AND signing_date < "2026-07-01".
 - For rankings like "哪个小区成交最多", group by residential and order by COUNT(*) DESC.
 
 Output JSON format:
 {
-  "sql": "SELECT ... FROM allowed_orders WHERE ... GROUP BY ... ORDER BY ... LIMIT 10",
-  "params": [],
+  "sql": "SELECT residential AS name, COUNT(*) AS count FROM allowed_orders WHERE signing_date >= ? AND signing_date < ? GROUP BY residential ORDER BY count DESC LIMIT 10",
+  "params": ["2026-06-01", "2026-07-01"],
   "chart": {"type": "bar|line|none", "x_field": "name", "y_field": "count"}
 }
 
@@ -73,8 +51,22 @@ Do not invent data.
 """.strip()
 
 
+def llm_is_configured() -> bool:
+    return bool(settings.llm_enabled and settings.llm_api_key)
+
+
+def llm_config_summary() -> dict[str, Any]:
+    return {
+        "enabled": settings.llm_enabled,
+        "provider": settings.llm_provider,
+        "model": settings.llm_model,
+        "base_url": settings.llm_base_url,
+        "has_api_key": bool(settings.llm_api_key),
+    }
+
+
 def call_llm(messages: list[dict[str, str]], json_mode: bool = True) -> str | None:
-    if not settings.llm_enabled or not settings.llm_api_key:
+    if not llm_is_configured():
         return None
 
     url = settings.llm_base_url.rstrip("/") + "/v1/chat/completions"
@@ -101,22 +93,6 @@ def call_llm(messages: list[dict[str, str]], json_mode: bool = True) -> str | No
             return data["choices"][0]["message"]["content"]
     except (urllib.error.URLError, KeyError, json.JSONDecodeError, TimeoutError):
         return None
-
-
-def parse_intent_with_llm(question: str) -> dict[str, Any] | None:
-    content = call_llm(
-        [
-            {"role": "system", "content": INTENT_PROMPT},
-            {"role": "user", "content": question},
-        ]
-    )
-    if not content:
-        return None
-    try:
-        intent = json.loads(content)
-    except json.JSONDecodeError:
-        return None
-    return intent if isinstance(intent, dict) else None
 
 
 def generate_sql_with_llm(question: str, rag_context: list[dict] | None = None) -> dict[str, Any] | None:
