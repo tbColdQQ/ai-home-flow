@@ -57,10 +57,15 @@ def list_orders(
     start_date: str | None = None,
     end_date: str | None = None,
     residential: str | None = None,
-    store: str | None = None,
     agent: str | None = None,
-    limit: int = 50,
-) -> list[dict]:
+    area: str | None = None,
+    acreage_min: float | None = None,
+    acreage_max: float | None = None,
+    price_min: float | None = None,
+    price_max: float | None = None,
+    page: int = 1,
+    page_size: int = 20,
+) -> dict[str, Any]:
     clauses = ["city = ?", "COALESCE(status, 'normal') = 'normal'"]
     params: list[Any] = [city]
     if start_date:
@@ -72,26 +77,51 @@ def list_orders(
     if residential:
         clauses.append("residential LIKE ?")
         params.append(f"%{residential}%")
-    if store:
-        clauses.append("store LIKE ?")
-        params.append(f"%{store}%")
     if agent:
         clauses.append("agent LIKE ?")
         params.append(f"%{agent}%")
-    params.append(limit)
+    if area:
+        clauses.append("area LIKE ?")
+        params.append(f"%{area}%")
+    if acreage_min is not None:
+        clauses.append("acreage >= ?")
+        params.append(acreage_min)
+    if acreage_max is not None:
+        clauses.append("acreage <= ?")
+        params.append(acreage_max)
+    if price_min is not None:
+        clauses.append("price >= ?")
+        params.append(price_min)
+    if price_max is not None:
+        clauses.append("price <= ?")
+        params.append(price_max)
+
+    where_sql = " AND ".join(clauses)
+    total = conn.execute(
+        f"SELECT COUNT(*) AS total FROM orders WHERE {where_sql}",
+        tuple(params),
+    ).fetchone()["total"]
+
+    safe_page = max(page, 1)
+    safe_page_size = min(max(page_size, 10), 200)
+    offset = (safe_page - 1) * safe_page_size
     rows = conn.execute(
         f"""
         SELECT *
         FROM orders
-        WHERE {' AND '.join(clauses)}
+        WHERE {where_sql}
         ORDER BY signing_date DESC, ID DESC
-        LIMIT ?
+        LIMIT ? OFFSET ?
         """,
-        tuple(params),
+        tuple(params + [safe_page_size, offset]),
     ).fetchall()
-    return rows_to_dicts(rows)
+    return {
+        "items": rows_to_dicts(rows),
+        "total": total,
+        "page": safe_page,
+        "page_size": safe_page_size,
+    }
 
 
 def today_iso() -> str:
     return date.today().isoformat()
-

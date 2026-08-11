@@ -15,13 +15,32 @@ def orders(
     start_date: str | None = None,
     end_date: str | None = None,
     residential: str | None = None,
-    store: str | None = None,
     agent: str | None = None,
-    limit: int = 50,
+    area: str | None = None,
+    acreage_min: float | None = None,
+    acreage_max: float | None = None,
+    price_min: float | None = None,
+    price_max: float | None = None,
+    page: int = 1,
+    page_size: int = 20,
     user: CurrentUser = Depends(current_user),
 ):
     with get_connection() as conn:
-        return list_orders(conn, user.city, start_date, end_date, residential, store, agent, min(limit, 200))
+        return list_orders(
+            conn=conn,
+            city=user.city,
+            start_date=start_date,
+            end_date=end_date,
+            residential=residential,
+            agent=agent,
+            area=area,
+            acreage_min=acreage_min,
+            acreage_max=acreage_max,
+            price_min=price_min,
+            price_max=price_max,
+            page=page,
+            page_size=page_size,
+        )
 
 
 @router.post("/import-excel")

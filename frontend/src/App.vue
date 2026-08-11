@@ -11,6 +11,20 @@ const loginForm = ref({ username: 'admin', password: '' })
 const question = ref('本月哪个小区成交最多？')
 const answer = ref('')
 const orders = ref([])
+const orderTotal = ref(0)
+const orderPage = ref(1)
+const orderPageSize = ref(20)
+const orderFilters = ref({
+  start_date: '',
+  end_date: '',
+  residential: '',
+  agent: '',
+  area: '',
+  acreage_min: '',
+  acreage_max: '',
+  price_min_wan: '',
+  price_max_wan: '',
+})
 const tasks = ref([])
 const overview = ref({})
 const users = ref([])
@@ -26,6 +40,7 @@ const importing = ref(false)
 const isLoggedIn = computed(() => Boolean(token.value && user.value))
 const isAdmin = computed(() => user.value?.roles?.includes('admin'))
 const canHandleTasks = computed(() => user.value?.roles?.some((role) => ['admin', 'store_manager'].includes(role)))
+const totalPages = computed(() => Math.max(1, Math.ceil(orderTotal.value / orderPageSize.value)))
 
 const menus = computed(() => [
   { key: 'dashboard', label: '首页' },
@@ -87,8 +102,30 @@ async function logout(callApi = true) {
   localStorage.removeItem('home_flow_user')
 }
 
+function appendParam(params, key, value) {
+  if (value !== null && value !== undefined && value !== '') {
+    params.set(key, value)
+  }
+}
+
 async function loadOrders() {
-  orders.value = await api('/api/orders?limit=20')
+  const params = new URLSearchParams()
+  params.set('page', orderPage.value)
+  params.set('page_size', orderPageSize.value)
+  appendParam(params, 'start_date', orderFilters.value.start_date)
+  appendParam(params, 'end_date', orderFilters.value.end_date)
+  appendParam(params, 'residential', orderFilters.value.residential)
+  appendParam(params, 'agent', orderFilters.value.agent)
+  appendParam(params, 'area', orderFilters.value.area)
+  appendParam(params, 'acreage_min', orderFilters.value.acreage_min)
+  appendParam(params, 'acreage_max', orderFilters.value.acreage_max)
+  appendParam(params, 'price_min', orderFilters.value.price_min_wan ? Number(orderFilters.value.price_min_wan) * 10000 : '')
+  appendParam(params, 'price_max', orderFilters.value.price_max_wan ? Number(orderFilters.value.price_max_wan) * 10000 : '')
+  const data = await api(`/api/orders?${params.toString()}`)
+  orders.value = data.items
+  orderTotal.value = data.total
+  orderPage.value = data.page
+  orderPageSize.value = data.page_size
 }
 
 async function loadTasks() {
@@ -116,6 +153,37 @@ async function loadAdminData() {
 async function loadAll() {
   message.value = ''
   await Promise.all([loadOrders(), loadTasks(), loadAdminData()])
+}
+
+async function applyOrderFilters() {
+  orderPage.value = 1
+  await loadOrders()
+}
+
+async function resetOrderFilters() {
+  orderFilters.value = {
+    start_date: '',
+    end_date: '',
+    residential: '',
+    agent: '',
+    area: '',
+    acreage_min: '',
+    acreage_max: '',
+    price_min_wan: '',
+    price_max_wan: '',
+  }
+  orderPage.value = 1
+  await loadOrders()
+}
+
+async function changeOrderPage(nextPage) {
+  orderPage.value = Math.min(Math.max(nextPage, 1), totalPages.value)
+  await loadOrders()
+}
+
+async function changeOrderPageSize() {
+  orderPage.value = 1
+  await loadOrders()
 }
 
 async function scanImages() {
@@ -149,6 +217,7 @@ async function uploadExcel(event) {
     const data = await res.json()
     if (!res.ok) throw new Error(data.detail || '导入失败')
     message.value = `导入完成：共 ${data.total} 行，成功 ${data.success} 行，跳过重复 ${data.skipped} 行，失败 ${data.failed} 行`
+    orderPage.value = 1
     await loadAll()
   } catch (error) {
     message.value = error.message
@@ -262,7 +331,7 @@ onMounted(async () => {
       <p v-if="message" class="notice">{{ message }}</p>
 
       <section v-if="activePage === 'dashboard'" class="cards">
-        <article class="metric"><span>成交记录</span><strong>{{ overview.orders ?? orders.length }}</strong></article>
+        <article class="metric"><span>成交记录</span><strong>{{ overview.orders ?? orderTotal }}</strong></article>
         <article class="metric"><span>待办</span><strong>{{ overview.pending_tasks ?? tasks.length }}</strong></article>
         <article class="metric"><span>用户</span><strong>{{ overview.users ?? '-' }}</strong></article>
         <article class="metric"><span>角色</span><strong>{{ overview.roles ?? '-' }}</strong></article>
@@ -270,7 +339,7 @@ onMounted(async () => {
 
       <section v-if="activePage === 'orders'" class="panel">
         <div class="panel-header">
-          <h2>最新成交</h2>
+          <h2>成交数据</h2>
           <div>
             <input ref="excelInputRef" class="hidden-input" type="file" accept=".xlsx" @change="uploadExcel" />
             <button v-if="isAdmin" :disabled="importing" @click="chooseExcel">
@@ -278,13 +347,77 @@ onMounted(async () => {
             </button>
           </div>
         </div>
+
+        <section class="filters">
+          <label>
+            开始日期
+            <input v-model="orderFilters.start_date" type="date" />
+          </label>
+          <label>
+            结束日期
+            <input v-model="orderFilters.end_date" type="date" />
+          </label>
+          <label>
+            楼盘
+            <input v-model="orderFilters.residential" placeholder="小区/楼盘" @keyup.enter="applyOrderFilters" />
+          </label>
+          <label>
+            经纪人
+            <input v-model="orderFilters.agent" placeholder="成交人" @keyup.enter="applyOrderFilters" />
+          </label>
+          <label>
+            区域
+            <input v-model="orderFilters.area" placeholder="区域" @keyup.enter="applyOrderFilters" />
+          </label>
+          <label>
+            面积下限
+            <input v-model="orderFilters.acreage_min" type="number" min="0" placeholder="㎡" />
+          </label>
+          <label>
+            面积上限
+            <input v-model="orderFilters.acreage_max" type="number" min="0" placeholder="㎡" />
+          </label>
+          <label>
+            成交价下限
+            <input v-model="orderFilters.price_min_wan" type="number" min="0" placeholder="万元" />
+          </label>
+          <label>
+            成交价上限
+            <input v-model="orderFilters.price_max_wan" type="number" min="0" placeholder="万元" />
+          </label>
+          <div class="filter-actions">
+            <button @click="applyOrderFilters">筛选</button>
+            <button class="secondary" @click="resetOrderFilters">重置</button>
+          </div>
+        </section>
+
+        <div class="table-meta">
+          <span>共 {{ orderTotal }} 条</span>
+          <select v-model.number="orderPageSize" @change="changeOrderPageSize">
+            <option :value="20">20 条/页</option>
+            <option :value="50">50 条/页</option>
+            <option :value="100">100 条/页</option>
+          </select>
+        </div>
+
         <table>
           <thead>
-            <tr><th>日期</th><th>楼盘</th><th>面积</th><th>成交价</th><th>经纪人</th><th>门店</th></tr>
+            <tr>
+              <th>日期</th>
+              <th>区域</th>
+              <th>街道</th>
+              <th>楼盘</th>
+              <th>面积</th>
+              <th>成交价</th>
+              <th>经纪人</th>
+              <th>门店</th>
+            </tr>
           </thead>
           <tbody>
             <tr v-for="item in orders" :key="item.ID">
               <td>{{ item.signing_date }}</td>
+              <td>{{ item.area }}</td>
+              <td>{{ item.street }}</td>
               <td>{{ item.residential }}</td>
               <td>{{ item.acreage }}</td>
               <td>{{ item.price }}</td>
@@ -293,6 +426,12 @@ onMounted(async () => {
             </tr>
           </tbody>
         </table>
+
+        <div class="pagination">
+          <button class="secondary" :disabled="orderPage <= 1" @click="changeOrderPage(orderPage - 1)">上一页</button>
+          <span>第 {{ orderPage }} / {{ totalPages }} 页</span>
+          <button class="secondary" :disabled="orderPage >= totalPages" @click="changeOrderPage(orderPage + 1)">下一页</button>
+        </div>
       </section>
 
       <section v-if="activePage === 'qa'" class="panel">
