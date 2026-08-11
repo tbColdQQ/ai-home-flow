@@ -10,3 +10,4 @@ dist/
 data/storage/*.db
 data/storage/*.db-*
 data/incoming/
+tmp/

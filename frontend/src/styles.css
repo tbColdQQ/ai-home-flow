@@ -209,6 +209,22 @@ p {
   font-size: 18px;
 }
 
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.panel-header h2 {
+  margin-bottom: 0;
+}
+
+.hidden-input {
+  display: none;
+}
+
 .qa {
   display: grid;
   grid-template-columns: 1fr auto;

@@ -20,6 +20,8 @@ const cities = ref([])
 const stores = ref([])
 const newUser = ref({ username: '', display_name: '', password: '', city_id: null, store_id: null, role_codes: ['clerk'] })
 const chartRef = ref(null)
+const excelInputRef = ref(null)
+const importing = ref(false)
 
 const isLoggedIn = computed(() => Boolean(token.value && user.value))
 const isAdmin = computed(() => user.value?.roles?.includes('admin'))
@@ -76,7 +78,7 @@ async function logout(callApi = true) {
     try {
       await api('/api/auth/logout', { method: 'POST' })
     } catch {
-      // The local session is cleared even if the server already expired it.
+      // Local session still gets cleared.
     }
   }
   token.value = ''
@@ -123,6 +125,35 @@ async function scanImages() {
     await loadAll()
   } catch (error) {
     message.value = error.message
+  }
+}
+
+function chooseExcel() {
+  excelInputRef.value?.click()
+}
+
+async function uploadExcel(event) {
+  const file = event.target.files?.[0]
+  event.target.value = ''
+  if (!file) return
+  importing.value = true
+  message.value = ''
+  try {
+    const form = new FormData()
+    form.append('file', file)
+    const res = await fetch(`${apiBase}/api/orders/import-excel`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token.value}` },
+      body: form,
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.detail || '导入失败')
+    message.value = `导入完成：共 ${data.total} 行，成功 ${data.success} 行，跳过重复 ${data.skipped} 行，失败 ${data.failed} 行`
+    await loadAll()
+  } catch (error) {
+    message.value = error.message
+  } finally {
+    importing.value = false
   }
 }
 
@@ -238,7 +269,15 @@ onMounted(async () => {
       </section>
 
       <section v-if="activePage === 'orders'" class="panel">
-        <h2>最新成交</h2>
+        <div class="panel-header">
+          <h2>最新成交</h2>
+          <div>
+            <input ref="excelInputRef" class="hidden-input" type="file" accept=".xlsx" @change="uploadExcel" />
+            <button v-if="isAdmin" :disabled="importing" @click="chooseExcel">
+              {{ importing ? '导入中...' : '导入成交数据' }}
+            </button>
+          </div>
+        </div>
         <table>
           <thead>
             <tr><th>日期</th><th>楼盘</th><th>面积</th><th>成交价</th><th>经纪人</th><th>门店</th></tr>
