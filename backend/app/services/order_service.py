@@ -33,6 +33,26 @@ ORDER_FIELDS = {
     "raw_payload_json",
 }
 
+ORDER_EDIT_FIELDS = {
+    "area",
+    "street",
+    "residential",
+    "room_number",
+    "acreage",
+    "list_price",
+    "price",
+    "agent",
+    "store",
+    "signing_date",
+    "CA",
+    "maintainor",
+    "parking",
+    "remark",
+    "location",
+    "brand",
+    "review_status",
+}
+
 
 def create_order(conn: sqlite3.Connection, data: dict[str, Any]) -> int:
     now = datetime.now().isoformat(timespec="seconds")
@@ -49,6 +69,60 @@ def create_order(conn: sqlite3.Connection, data: dict[str, Any]) -> int:
         tuple(payload.values()),
     )
     return int(cursor.lastrowid)
+
+
+def get_order(conn: sqlite3.Connection, city: str, order_id: int) -> dict[str, Any] | None:
+    row = conn.execute(
+        """
+        SELECT *
+        FROM orders
+        WHERE ID = ?
+          AND city = ?
+          AND COALESCE(status, 'normal') = 'normal'
+        """,
+        (order_id, city),
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def update_order(conn: sqlite3.Connection, city: str, order_id: int, data: dict[str, Any], modifier: str) -> dict[str, Any] | None:
+    payload = {key: value for key, value in data.items() if key in ORDER_EDIT_FIELDS}
+    if not payload:
+        return get_order(conn, city, order_id)
+
+    payload["modifier"] = modifier
+    payload["modify_time"] = datetime.now().isoformat(timespec="seconds")
+    assignments = ", ".join([f"{key} = ?" for key in payload])
+    params = list(payload.values()) + [order_id, city]
+    cursor = conn.execute(
+        f"""
+        UPDATE orders
+        SET {assignments}
+        WHERE ID = ?
+          AND city = ?
+          AND COALESCE(status, 'normal') = 'normal'
+        """,
+        tuple(params),
+    )
+    if cursor.rowcount == 0:
+        return None
+    return get_order(conn, city, order_id)
+
+
+def cancel_order(conn: sqlite3.Connection, city: str, order_id: int, modifier: str) -> bool:
+    cursor = conn.execute(
+        """
+        UPDATE orders
+        SET status = 'cancel',
+            modifier = ?,
+            modify_time = ?
+        WHERE ID = ?
+          AND city = ?
+          AND COALESCE(status, 'normal') = 'normal'
+        """,
+        (modifier, datetime.now().isoformat(timespec="seconds"), order_id, city),
+    )
+    return cursor.rowcount > 0
 
 
 def list_orders(

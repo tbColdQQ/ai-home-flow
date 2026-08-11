@@ -18,6 +18,7 @@ class CurrentUser:
     display_name: str
     city: str
     role_codes: list[str]
+    store_id: int | None = None
 
 
 def hash_password(password: str) -> str:
@@ -90,7 +91,7 @@ def get_user(username: str) -> CurrentUser | None:
     with get_connection() as conn:
         row = conn.execute(
             """
-            SELECT u.id, u.username, u.display_name, COALESCE(c.name, ?) AS city
+            SELECT u.id, u.username, u.display_name, u.store_id, COALESCE(c.name, ?) AS city
             FROM users u
             LEFT JOIN cities c ON c.id = u.city_id
             WHERE u.username = ? AND u.status = 'active'
@@ -114,6 +115,7 @@ def get_user(username: str) -> CurrentUser | None:
             display_name=row["display_name"],
             city=row["city"],
             role_codes=[role["code"] for role in roles],
+            store_id=row["store_id"],
         )
 
 
@@ -170,6 +172,7 @@ def user_to_dict(user: CurrentUser, token: str | None = None) -> dict:
         "display_name": user.display_name,
         "city": user.city,
         "roles": user.role_codes,
+        "store_id": user.store_id,
     }
     if token:
         payload["token"] = token
