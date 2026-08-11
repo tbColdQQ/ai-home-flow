@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+.venv/
+.env
+*.env
+
+node_modules/
+dist/
+
+data/storage/*.db
+data/storage/*.db-*
+data/incoming/
