@@ -1,6 +1,4 @@
 import json
-import urllib.error
-import urllib.request
 from typing import Any
 
 from app.core.config import settings
@@ -62,36 +60,69 @@ def llm_config_summary() -> dict[str, Any]:
         "model": settings.llm_model,
         "base_url": settings.llm_base_url,
         "has_api_key": bool(settings.llm_api_key),
+        "framework": "langchain",
     }
+
+
+def _normalize_openai_base_url(base_url: str) -> str:
+    cleaned = base_url.rstrip("/")
+    if cleaned.endswith("/compatible-mode"):
+        return f"{cleaned}/v1"
+    return cleaned
+
+
+def _build_chat_model():
+    provider = settings.llm_provider.lower()
+    if provider == "deepseek":
+        from langchain_deepseek import ChatDeepSeek
+
+        return ChatDeepSeek(
+            model=settings.llm_model,
+            api_key=settings.llm_api_key,
+            base_url=settings.llm_base_url,
+            temperature=0,
+            timeout=settings.llm_timeout_seconds,
+            max_retries=1,
+        )
+
+    from langchain_openai import ChatOpenAI
+
+    return ChatOpenAI(
+        model=settings.llm_model,
+        api_key=settings.llm_api_key,
+        base_url=_normalize_openai_base_url(settings.llm_base_url),
+        temperature=0,
+        timeout=settings.llm_timeout_seconds,
+        max_retries=1,
+    )
+
+
+def _message_content(response: Any) -> str:
+    content = getattr(response, "content", response)
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            if isinstance(item, dict):
+                parts.append(str(item.get("text") or item.get("content") or ""))
+            else:
+                parts.append(str(item))
+        return "".join(parts)
+    return str(content)
 
 
 def call_llm(messages: list[dict[str, str]], json_mode: bool = True) -> str | None:
     if not llm_is_configured():
         return None
 
-    url = settings.llm_base_url.rstrip("/") + "/v1/chat/completions"
-    payload: dict[str, Any] = {
-        "model": settings.llm_model,
-        "messages": messages,
-        "temperature": 0.1,
-    }
-    if json_mode:
-        payload["response_format"] = {"type": "json_object"}
-
-    request = urllib.request.Request(
-        url,
-        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-        headers={
-            "Authorization": f"Bearer {settings.llm_api_key}",
-            "Content-Type": "application/json",
-        },
-        method="POST",
-    )
     try:
-        with urllib.request.urlopen(request, timeout=settings.llm_timeout_seconds) as response:
-            data = json.loads(response.read().decode("utf-8"))
-            return data["choices"][0]["message"]["content"]
-    except (urllib.error.URLError, KeyError, json.JSONDecodeError, TimeoutError):
+        model = _build_chat_model()
+        if json_mode and hasattr(model, "bind"):
+            model = model.bind(response_format={"type": "json_object"})
+        response = model.invoke([(message["role"], message["content"]) for message in messages])
+        return _message_content(response).strip()
+    except Exception:
         return None
 
 

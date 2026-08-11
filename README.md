@@ -69,6 +69,11 @@ example.txt
 
 默认不开启大模型，问答会使用本地规则解析。开启后，大模型只负责解析查询意图，后端仍然负责 SQL 生成、参数绑定和城市权限过滤。
 
+大模型调用已集成 LangChain：
+
+- DeepSeek 使用 `langchain-deepseek` 的 `ChatDeepSeek`
+- 千问、GLM 等 OpenAI-compatible 接口使用 `langchain-openai` 的 `ChatOpenAI(base_url=...)`
+
 本地维护密钥请使用：
 
 ```text
