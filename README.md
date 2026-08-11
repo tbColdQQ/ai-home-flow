@@ -69,6 +69,18 @@ example.txt
 
 默认不开启大模型，问答会使用本地规则解析。开启后，大模型只负责解析查询意图，后端仍然负责 SQL 生成、参数绑定和城市权限过滤。
 
+本地维护密钥请使用：
+
+```text
+backend/llm_keys.env
+```
+
+这个文件已被 `.gitignore` 忽略，不会提交到 GitHub。可以复制模板：
+
+```bash
+copy backend\llm_keys.env.example backend\llm_keys.env
+```
+
 DeepSeek 示例：
 
 ```text
