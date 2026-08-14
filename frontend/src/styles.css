@@ -9,8 +9,8 @@ body {
   background: #f3f6fb;
 }
 
-button,
-input,
+button:not([class^="el-"]):not([class*=" el-"]),
+input:not([class^="el-"]):not([class*=" el-"]),
 select {
   height: 40px;
   border: 1px solid #cfd7e6;
@@ -18,14 +18,14 @@ select {
   font: inherit;
 }
 
-input,
+input:not([class^="el-"]):not([class*=" el-"]),
 select {
   width: 100%;
   padding: 0 11px;
   background: #fff;
 }
 
-button {
+button:not([class^="el-"]):not([class*=" el-"]) {
   padding: 0 16px;
   border-color: #2563eb;
   color: #fff;
@@ -33,24 +33,24 @@ button {
   cursor: pointer;
 }
 
-button:disabled {
+button:not([class^="el-"]):not([class*=" el-"]):disabled {
   cursor: not-allowed;
   opacity: 0.55;
 }
 
-button.secondary {
+button.secondary:not([class^="el-"]):not([class*=" el-"]) {
   border-color: #cfd7e6;
   color: #172033;
   background: #fff;
 }
 
-button.danger {
+button.danger:not([class^="el-"]):not([class*=" el-"]) {
   border-color: #dc2626;
   color: #fff;
   background: #dc2626;
 }
 
-button.small {
+button.small:not([class^="el-"]):not([class*=" el-"]) {
   height: 32px;
   padding: 0 10px;
   font-size: 13px;
@@ -389,9 +389,8 @@ th {
 
 .duty-roster-editor {
   display: grid;
-  grid-template-columns: 1.2fr 1fr auto;
+  grid-template-columns: 1fr;
   gap: 12px;
-  align-items: end;
   margin-bottom: 12px;
   padding: 12px;
   background: #f8fafc;
@@ -424,49 +423,85 @@ th {
   border-radius: 6px;
 }
 
-.calendar-grid {
-  display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.calendar-head {
-  padding: 8px;
-  color: #64748b;
-  font-size: 13px;
-  font-weight: 600;
-  text-align: center;
-}
-
-.calendar-day {
-  min-height: 92px;
-  display: grid;
-  gap: 4px;
-  align-content: start;
-  padding: 10px;
+.today-duty {
+  margin-bottom: 12px;
+  padding: 10px 12px;
   color: #172033;
-  background: #fff;
-  border-color: #e2e8f0;
+  background: #ecfdf5;
+  border: 1px solid #bbf7d0;
+  border-radius: 6px;
+}
+
+.duty-calendar {
+  --el-calendar-cell-width: 96px;
+}
+
+.duty-calendar .el-calendar-day {
+  height: 96px;
+  padding: 0;
+}
+
+.duty-date-cell {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid transparent;
+  color: #172033;
+  background: transparent;
   text-align: left;
 }
 
-.calendar-day strong {
-  font-size: 18px;
-}
-
-.calendar-day span {
+.duty-date-cell span {
+  width: 28px;
+  height: 28px;
+  display: inline-grid;
+  place-items: center;
   color: #64748b;
-  font-size: 12px;
-}
-
-.calendar-day em {
-  font-style: normal;
   font-weight: 600;
+  border-radius: 999px;
 }
 
-.calendar-day.override {
-  border-color: #2563eb;
+.duty-date-cell strong {
+  color: #172033;
+  font-size: 14px;
+}
+
+.duty-date-cell em {
+  width: fit-content;
+  padding: 2px 6px;
+  color: #1d4ed8;
+  font-size: 12px;
+  font-style: normal;
+  background: #dbeafe;
+  border-radius: 999px;
+}
+
+.duty-date-cell.today {
   background: #eff6ff;
+  border-color: #2563eb;
+}
+
+.duty-date-cell.today span {
+  color: #fff;
+  background: #2563eb;
+}
+
+.duty-date-cell.override {
+  background: #fff7ed;
+  border-color: #fb923c;
+}
+
+.data-table {
+  width: 100%;
+  margin-top: 12px;
+}
+
+.element-pagination {
+  justify-content: flex-end;
+  margin-top: 14px;
 }
 
 .admin-grid {
@@ -564,8 +599,7 @@ th {
   .qa,
   .form-grid,
   .filters,
-  .duty-roster-editor,
-  .calendar-grid {
+  .duty-roster-editor {
     display: grid;
     grid-template-columns: 1fr;
   }

@@ -55,6 +55,12 @@ ORDER_EDIT_FIELDS = {
     "review_status",
 }
 
+ORDER_SORT_FIELDS = {
+    "signing_date",
+    "acreage",
+    "price",
+}
+
 
 def create_order(conn: sqlite3.Connection, data: dict[str, Any]) -> int:
     now = datetime.now().isoformat(timespec="seconds")
@@ -139,6 +145,8 @@ def list_orders(
     acreage_max: float | None = None,
     price_min: float | None = None,
     price_max: float | None = None,
+    sort_by: str | None = None,
+    sort_order: str | None = None,
     page: int = 1,
     page_size: int = 20,
 ) -> dict[str, Any]:
@@ -180,13 +188,15 @@ def list_orders(
 
     safe_page = max(page, 1)
     safe_page_size = min(max(page_size, 10), 200)
+    safe_sort_by = sort_by if sort_by in ORDER_SORT_FIELDS else "signing_date"
+    safe_sort_order = "ASC" if str(sort_order).lower() == "asc" else "DESC"
     offset = (safe_page - 1) * safe_page_size
     rows = conn.execute(
         f"""
         SELECT *
         FROM orders
         WHERE {where_sql}
-        ORDER BY signing_date DESC, ID DESC
+        ORDER BY {safe_sort_by} {safe_sort_order}, ID DESC
         LIMIT ? OFFSET ?
         """,
         tuple(params + [safe_page_size, offset]),

@@ -48,6 +48,8 @@ def orders(
     acreage_max: float | None = None,
     price_min: float | None = None,
     price_max: float | None = None,
+    sort_by: str | None = None,
+    sort_order: str | None = None,
     page: int = 1,
     page_size: int = 20,
     user: CurrentUser = Depends(current_user),
@@ -65,6 +67,8 @@ def orders(
             acreage_max=acreage_max,
             price_min=price_min,
             price_max=price_max,
+            sort_by=sort_by,
+            sort_order=sort_order,
             page=page,
             page_size=page_size,
         )

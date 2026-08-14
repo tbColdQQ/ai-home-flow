@@ -33,6 +33,8 @@ const orderFilters = ref({
   acreage_max: '',
   price_min_wan: '',
   price_max_wan: '',
+  sort_by: '',
+  sort_order: '',
 })
 const selectedOrder = ref(null)
 const orderDialogMode = ref('detail')
@@ -42,9 +44,9 @@ const selectedTask = ref(null)
 const taskForm = ref({})
 const taskRemark = ref('')
 const dutyMonth = ref(new Date().toISOString().slice(0, 7))
+const dutyCalendarDate = ref(new Date())
 const dutyDays = ref([])
 const dutyRoster = ref([])
-const dutyRosterText = ref('')
 const selectedDutyDay = ref(null)
 const selectedDutyUserId = ref(null)
 const overview = ref({})
@@ -75,6 +77,15 @@ const canEditOrders = computed(() => isAdmin.value || isStoreManager.value)
 const canManageLeases = computed(() => user.value?.roles?.some((role) => ['admin', 'rental_agent'].includes(role)))
 const totalPages = computed(() => Math.max(1, Math.ceil(orderTotal.value / orderPageSize.value)))
 const leaseTotalPages = computed(() => Math.max(1, Math.ceil(leaseTotal.value / leasePageSize.value)))
+const todayText = computed(() => formatDate(new Date()))
+const dutyDayMap = computed(() => {
+  const map = {}
+  dutyDays.value.forEach((day) => {
+    map[day.date] = day
+  })
+  return map
+})
+const todayDuty = computed(() => dutyDayMap.value[todayText.value])
 
 const menus = computed(() => [
   { key: 'dashboard', label: '首页' },
@@ -191,6 +202,8 @@ async function loadOrders() {
   const params = new URLSearchParams()
   params.set('page', orderPage.value)
   params.set('page_size', orderPageSize.value)
+  appendParam(params, 'sort_by', orderFilters.value.sort_by)
+  appendParam(params, 'sort_order', orderFilters.value.sort_order)
   appendParam(params, 'start_date', orderFilters.value.start_date)
   appendParam(params, 'end_date', orderFilters.value.end_date)
   appendParam(params, 'residential', orderFilters.value.residential)
@@ -232,7 +245,7 @@ async function loadDuty() {
   const data = await api(`/api/duty/schedule?month=${dutyMonth.value}`)
   dutyDays.value = data.days || []
   dutyRoster.value = data.roster || []
-  dutyRosterText.value = dutyRoster.value.map((item) => item.id).join(',')
+  dutyCalendarDate.value = new Date(`${dutyMonth.value}-01T00:00:00`)
 }
 
 async function loadAdminData() {
@@ -276,6 +289,8 @@ async function resetOrderFilters() {
     acreage_max: '',
     price_min_wan: '',
     price_max_wan: '',
+    sort_by: '',
+    sort_order: '',
   }
   orderPage.value = 1
   await loadOrders()
@@ -306,16 +321,32 @@ function dutyWeekdayLabel(value) {
   return ['一', '二', '三', '四', '五', '六', '日'][value] || ''
 }
 
+function formatDate(value) {
+  const date = value instanceof Date ? value : new Date(value)
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function dutyCellDay(data) {
+  return dutyDayMap.value[data.day]
+}
+
+function isDutyToday(dateText) {
+  return dateText === todayText.value
+}
+
 async function changeDutyMonth() {
+  dutyCalendarDate.value = new Date(`${dutyMonth.value}-01T00:00:00`)
   await loadDuty()
 }
 
 async function saveDutyRoster() {
   try {
-    const user_ids = rolePayloadText(dutyRosterText.value).map((item) => Number(item)).filter(Boolean)
+    const user_ids = dutyRoster.value.map((item) => Number(item.id)).filter(Boolean)
     const data = await api('/api/duty/roster', { method: 'PUT', body: JSON.stringify({ user_ids }) })
     dutyRoster.value = data.roster || []
-    dutyRosterText.value = dutyRoster.value.map((item) => item.id).join(',')
     message.value = '值班排序已保存'
     await loadDuty()
   } catch (error) {
@@ -325,6 +356,22 @@ async function saveDutyRoster() {
 
 function openDutyDay(day) {
   if (!isStoreManager.value || !day.user_id) return
+  selectedDutyDay.value = day
+  selectedDutyUserId.value = day.user_id
+}
+
+function moveDutyRoster(index, delta) {
+  const targetIndex = index + delta
+  if (targetIndex < 0 || targetIndex >= dutyRoster.value.length) return
+  const next = [...dutyRoster.value]
+  const [item] = next.splice(index, 1)
+  next.splice(targetIndex, 0, item)
+  dutyRoster.value = next.map((row, rowIndex) => ({ ...row, sort_order: rowIndex + 1 }))
+}
+
+function openDutyDate(dateText) {
+  const day = dutyDayMap.value[dateText]
+  if (!isStoreManager.value || !day) return
   selectedDutyDay.value = day
   selectedDutyUserId.value = day.user_id
 }
@@ -354,6 +401,32 @@ async function changeLeasePage(nextPage) {
 }
 
 async function changeLeasePageSize() {
+  leasePage.value = 1
+  await loadLeases()
+}
+
+async function changeOrderPagination(page, pageSize) {
+  orderPage.value = page
+  orderPageSize.value = pageSize
+  await loadOrders()
+}
+
+async function handleOrderSort({ prop, order }) {
+  orderFilters.value.sort_by = order ? prop : ''
+  orderFilters.value.sort_order = order === 'descending' ? 'desc' : order === 'ascending' ? 'asc' : ''
+  orderPage.value = 1
+  await loadOrders()
+}
+
+async function changeLeasePagination(page, pageSize) {
+  leasePage.value = page
+  leasePageSize.value = pageSize
+  await loadLeases()
+}
+
+async function handleLeaseSort({ prop, order }) {
+  leaseFilters.value.sort_by = order ? prop : 'lease_expire_date'
+  leaseFilters.value.sort_order = order === 'descending' ? 'desc' : 'asc'
   leasePage.value = 1
   await loadLeases()
 }
@@ -872,27 +945,38 @@ onMounted(async () => {
               <strong>值班排序</strong>
               <span>按店员 ID 逗号分隔，系统按顺序每日轮换。</span>
             </div>
-            <input v-model="dutyRosterText" placeholder="例如：3,5,8" />
+            <el-table :data="dutyRoster" size="small" border>
+              <el-table-column prop="sort_order" label="顺序" width="80" />
+              <el-table-column prop="display_name" label="店员" min-width="140" />
+              <el-table-column label="操作" width="150">
+                <template #default="{ $index }">
+                  <el-button size="small" :disabled="$index === 0" @click="moveDutyRoster($index, -1)">上移</el-button>
+                  <el-button size="small" :disabled="$index === dutyRoster.length - 1" @click="moveDutyRoster($index, 1)">下移</el-button>
+                </template>
+              </el-table-column>
+            </el-table>
             <button @click="saveDutyRoster">保存排序</button>
           </div>
           <div class="duty-roster">
             <span v-for="item in dutyRoster" :key="item.id">{{ item.sort_order }}. {{ item.display_name }}（ID {{ item.id }}）</span>
             <span v-if="!dutyRoster.length">暂无可排班店员</span>
           </div>
-          <div class="calendar-grid">
-            <div class="calendar-head" v-for="label in ['一','二','三','四','五','六','日']" :key="label">{{ label }}</div>
-            <button
-              v-for="day in dutyDays"
-              :key="day.date"
-              class="calendar-day"
-              :class="{ override: day.is_override }"
-              @click="openDutyDay(day)"
-            >
-              <strong>{{ day.day }}</strong>
-              <span>周{{ dutyWeekdayLabel(day.weekday) }}</span>
-              <em>{{ day.display_name || '未排班' }}</em>
-            </button>
+          <div class="today-duty" v-if="todayDuty">
+            今日值班：<strong>{{ todayDuty.display_name || '未排班' }}</strong>
           </div>
+          <el-calendar v-model="dutyCalendarDate" class="duty-calendar">
+            <template #date-cell="{ data }">
+              <button
+                class="duty-date-cell"
+                :class="{ today: isDutyToday(data.day), override: dutyCellDay(data)?.is_override }"
+                @click="openDutyDate(data.day)"
+              >
+                <span>{{ Number(data.day.slice(-2)) }}</span>
+                <strong>{{ dutyCellDay(data)?.display_name || '未排班' }}</strong>
+                <em v-if="dutyCellDay(data)?.is_override">已调整</em>
+              </button>
+            </template>
+          </el-calendar>
         </section>
 
         <section class="panel">
@@ -941,53 +1025,36 @@ onMounted(async () => {
           </div>
         </section>
 
-        <div class="table-meta">
-          <span>共 {{ orderTotal }} 条</span>
-          <select v-model.number="orderPageSize" @change="changeOrderPageSize">
-            <option :value="20">20 条/页</option>
-            <option :value="50">50 条/页</option>
-            <option :value="100">100 条/页</option>
-          </select>
-        </div>
+        <el-table :data="orders" border stripe class="data-table" @sort-change="handleOrderSort">
+          <el-table-column prop="signing_date" label="日期" width="120" sortable="custom" />
+          <el-table-column prop="area" label="区域" width="110" />
+          <el-table-column prop="street" label="街道" width="120" />
+          <el-table-column prop="residential" label="楼盘" min-width="160" />
+          <el-table-column prop="acreage" label="面积" width="100" sortable="custom" />
+          <el-table-column prop="price" label="成交价" width="120" sortable="custom" />
+          <el-table-column prop="agent" label="经纪人" width="120" />
+          <el-table-column prop="store" label="门店" min-width="150" />
+          <el-table-column label="操作" width="210" fixed="right">
+            <template #default="{ row }">
+              <div class="row-actions">
+                <el-button size="small" @click="openOrder(row)">详情</el-button>
+                <el-button v-if="canEditOrders" size="small" @click="openOrder(row, 'edit')">修改</el-button>
+                <el-button v-if="canEditOrders" size="small" type="danger" @click="deleteOrder(row)">删除</el-button>
+              </div>
+            </template>
+          </el-table-column>
+        </el-table>
 
-        <table>
-          <thead>
-            <tr>
-              <th>日期</th>
-              <th>区域</th>
-              <th>街道</th>
-              <th>楼盘</th>
-              <th>面积</th>
-              <th>成交价</th>
-              <th>经纪人</th>
-              <th>门店</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="item in orders" :key="item.ID">
-              <td>{{ item.signing_date }}</td>
-              <td>{{ item.area }}</td>
-              <td>{{ item.street }}</td>
-              <td>{{ item.residential }}</td>
-              <td>{{ item.acreage }}</td>
-              <td>{{ item.price }}</td>
-              <td>{{ item.agent }}</td>
-              <td>{{ item.store }}</td>
-              <td class="row-actions">
-                <button class="small secondary" @click="openOrder(item)">详情</button>
-                <button v-if="canEditOrders" class="small secondary" @click="openOrder(item, 'edit')">修改</button>
-                <button v-if="canEditOrders" class="small danger" @click="deleteOrder(item)">删除</button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-
-        <div class="pagination">
-          <button class="secondary" :disabled="orderPage <= 1" @click="changeOrderPage(orderPage - 1)">上一页</button>
-          <span>第 {{ orderPage }} / {{ totalPages }} 页</span>
-          <button class="secondary" :disabled="orderPage >= totalPages" @click="changeOrderPage(orderPage + 1)">下一页</button>
-        </div>
+        <el-pagination
+          class="element-pagination"
+          background
+          layout="total, sizes, prev, pager, next, jumper"
+          :total="orderTotal"
+          :current-page="orderPage"
+          :page-size="orderPageSize"
+          :page-sizes="[20, 50, 100]"
+          @change="changeOrderPagination"
+        />
       </section>
 
       <section v-if="activePage === 'leases'" class="panel">
@@ -1006,73 +1073,44 @@ onMounted(async () => {
           <label>小区<input v-model="leaseFilters.community_name" placeholder="小区名称" @keyup.enter="applyLeaseFilters" /></label>
           <label>价格下限<input v-model="leaseFilters.price_min" type="number" min="0" placeholder="元/月" /></label>
           <label>价格上限<input v-model="leaseFilters.price_max" type="number" min="0" placeholder="元/月" /></label>
-          <label>
-            排序字段
-            <select v-model="leaseFilters.sort_by">
-              <option value="lease_expire_date">租期到期时间</option>
-              <option value="price">价格</option>
-            </select>
-          </label>
-          <label>
-            排序方式
-            <select v-model="leaseFilters.sort_order">
-              <option value="asc">升序</option>
-              <option value="desc">降序</option>
-            </select>
-          </label>
           <div class="filter-actions">
             <button @click="applyLeaseFilters">筛选</button>
             <button class="secondary" @click="resetLeaseFilters">重置</button>
           </div>
         </section>
 
-        <div class="table-meta">
-          <span>共 {{ leaseTotal }} 条</span>
-          <select v-model.number="leasePageSize" @change="changeLeasePageSize">
-            <option :value="20">20 条/页</option>
-            <option :value="50">50 条/页</option>
-            <option :value="100">100 条/页</option>
-          </select>
-        </div>
+        <el-table :data="leases" border stripe class="data-table" @sort-change="handleLeaseSort">
+          <el-table-column prop="community_name" label="小区" min-width="150" />
+          <el-table-column prop="address" label="地址" min-width="180" />
+          <el-table-column prop="acreage" label="面积" width="100" />
+          <el-table-column prop="price" label="价格" width="110" sortable="custom" />
+          <el-table-column prop="rental_type" label="出租方式" width="120" />
+          <el-table-column prop="agent" label="成交人" width="120" />
+          <el-table-column prop="lease_expire_date" label="租期到期" width="130" sortable="custom" />
+          <el-table-column label="钥匙" width="80">
+            <template #default="{ row }">{{ row.has_key ? '是' : '否' }}</template>
+          </el-table-column>
+          <el-table-column label="操作" width="210" fixed="right">
+            <template #default="{ row }">
+              <div class="row-actions">
+                <el-button size="small" @click="openLease(row)">详情</el-button>
+                <el-button size="small" @click="openLease(row, 'edit')">修改</el-button>
+                <el-button size="small" type="danger" @click="deleteLease(row)">删除</el-button>
+              </div>
+            </template>
+          </el-table-column>
+        </el-table>
 
-        <table>
-          <thead>
-            <tr>
-              <th>小区</th>
-              <th>地址</th>
-              <th>面积</th>
-              <th>价格</th>
-              <th>出租方式</th>
-              <th>成交人</th>
-              <th>租期到期</th>
-              <th>钥匙</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="item in leases" :key="item.id">
-              <td>{{ item.community_name }}</td>
-              <td>{{ item.address }}</td>
-              <td>{{ item.acreage }}</td>
-              <td>{{ item.price }}</td>
-              <td>{{ item.rental_type }}</td>
-              <td>{{ item.agent }}</td>
-              <td>{{ item.lease_expire_date }}</td>
-              <td>{{ item.has_key ? '是' : '否' }}</td>
-              <td class="row-actions">
-                <button class="small secondary" @click="openLease(item)">详情</button>
-                <button class="small secondary" @click="openLease(item, 'edit')">修改</button>
-                <button class="small danger" @click="deleteLease(item)">删除</button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-
-        <div class="pagination">
-          <button class="secondary" :disabled="leasePage <= 1" @click="changeLeasePage(leasePage - 1)">上一页</button>
-          <span>第 {{ leasePage }} / {{ leaseTotalPages }} 页</span>
-          <button class="secondary" :disabled="leasePage >= leaseTotalPages" @click="changeLeasePage(leasePage + 1)">下一页</button>
-        </div>
+        <el-pagination
+          class="element-pagination"
+          background
+          layout="total, sizes, prev, pager, next, jumper"
+          :total="leaseTotal"
+          :current-page="leasePage"
+          :page-size="leasePageSize"
+          :page-sizes="[20, 50, 100]"
+          @change="changeLeasePagination"
+        />
       </section>
 
       <section v-if="activePage === 'qa'" class="panel">
@@ -1262,30 +1300,29 @@ onMounted(async () => {
       </section>
     </div>
 
-    <div v-if="selectedDutyDay" class="dialog-backdrop" @click.self="closeDutyDialog">
-      <section class="dialog small-dialog">
-        <div class="panel-header">
-          <h2>修改值班人员</h2>
-          <button class="secondary" @click="closeDutyDialog">关闭</button>
-        </div>
-        <div class="form-grid single">
-          <label>
-            日期
-            <span class="readonly">{{ selectedDutyDay.date }}</span>
-          </label>
-          <label>
-            值班人员
-            <select v-model.number="selectedDutyUserId">
-              <option v-for="item in dutyRoster" :key="item.id" :value="item.id">{{ item.display_name }}</option>
-            </select>
-          </label>
-        </div>
-        <div class="actions">
-          <button @click="saveDutyAssignment">保存</button>
-          <button class="secondary" @click="closeDutyDialog">取消</button>
-        </div>
-      </section>
-    </div>
+    <el-dialog
+      :model-value="Boolean(selectedDutyDay)"
+      title="修改值班人员"
+      width="420px"
+      @close="closeDutyDialog"
+    >
+      <div v-if="selectedDutyDay" class="form-grid single">
+        <label>
+          日期
+          <span class="readonly">{{ selectedDutyDay.date }}</span>
+        </label>
+        <label>
+          值班人员
+          <el-select v-model="selectedDutyUserId" placeholder="请选择值班人员">
+            <el-option v-for="item in dutyRoster" :key="item.id" :label="item.display_name" :value="item.id" />
+          </el-select>
+        </label>
+      </div>
+      <template #footer>
+        <el-button @click="closeDutyDialog">取消</el-button>
+        <el-button type="primary" @click="saveDutyAssignment">保存</el-button>
+      </template>
+    </el-dialog>
 
     <div v-if="selectedLease" class="dialog-backdrop" @click.self="closeLeaseDialog">
       <section class="dialog">
