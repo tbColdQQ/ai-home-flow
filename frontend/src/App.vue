@@ -10,6 +10,7 @@ const message = ref('')
 const loginForm = ref({ username: 'admin', password: '' })
 const question = ref('本月哪个小区成交最多？')
 const answer = ref('')
+const isAsking = ref(false)
 const orders = ref([])
 const orderTotal = ref(0)
 const orderPage = ref(1)
@@ -75,6 +76,7 @@ const orderFields = [
   ['store', '门店', 'text'],
   ['brand', '品牌', 'text'],
   ['maintainor', '维护人', 'text'],
+  ['maintainor_store', '维护人门店', 'text'],
   ['CA', 'CA', 'text'],
   ['location', '位置', 'text'],
   ['remark', '备注', 'text'],
@@ -384,12 +386,15 @@ async function uploadExcel(event) {
 }
 
 async function ask() {
+  if (isAsking.value) return
+  isAsking.value = true
+  answer.value = '正在查询...'
   try {
     const data = await api('/api/qa/ask', {
       method: 'POST',
       body: JSON.stringify({ question: question.value }),
     })
-    answer.value = data.answer
+    answer.value = formatAnswer(data.answer)
     if (data.chart && chartRef.value) {
       const chart = echarts.getInstanceByDom(chartRef.value) || echarts.init(chartRef.value)
       chart.setOption({
@@ -402,7 +407,15 @@ async function ask() {
     }
   } catch (error) {
     answer.value = error.message
+  } finally {
+    isAsking.value = false
   }
+}
+
+function formatAnswer(value) {
+  const text = String(value || '').trim()
+  if (!text || text.includes('\n')) return text
+  return text.replace(/([。！？；])\s*/g, '$1\n').trim()
 }
 
 async function createUser() {
@@ -694,10 +707,10 @@ onMounted(async () => {
 
       <section v-if="activePage === 'qa'" class="panel">
         <div class="qa">
-          <input v-model="question" @keyup.enter="ask" />
-          <button @click="ask">提问</button>
+          <input v-model="question" :disabled="isAsking" @keyup.enter="ask" />
+          <button :disabled="isAsking" @click="ask">{{ isAsking ? '查询中...' : '提问' }}</button>
         </div>
-        <p class="answer">{{ answer }}</p>
+        <p class="answer" :class="{ loading: isAsking }">{{ answer }}</p>
         <div ref="chartRef" class="chart"></div>
       </section>
 

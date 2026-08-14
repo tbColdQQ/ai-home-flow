@@ -47,6 +47,7 @@ def migrate() -> None:
                 modifier TEXT,
                 modify_time TEXT,
                 maintainor TEXT,
+                maintainor_store TEXT,
                 parking INTEGER CHECK(parking IN (0, 1)),
                 status TEXT CHECK(status IN ('normal', 'cancel')),
                 remark TEXT,
@@ -62,6 +63,7 @@ def migrate() -> None:
         _add_column(conn, "orders", "source_file", "TEXT")
         _add_column(conn, "orders", "review_status", "TEXT DEFAULT 'confirmed'")
         _add_column(conn, "orders", "raw_payload_json", "TEXT")
+        _add_column(conn, "orders", "maintainor_store", "TEXT")
 
         conn.executescript(
             """

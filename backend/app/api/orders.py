@@ -24,6 +24,7 @@ class UpdateOrderRequest(BaseModel):
     signing_date: str | None = None
     CA: str | None = None
     maintainor: str | None = None
+    maintainor_store: str | None = None
     parking: int | None = None
     remark: str | None = None
     location: str | None = None

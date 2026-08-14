@@ -14,7 +14,7 @@ You must query ONLY from allowed_orders.
 Available columns:
 ID, city, area, street, residential, room_number, acreage, list_price, price,
 agent, store, signing_date, CA, creator, create_time, modifier, modify_time,
-maintainor, parking, status, remark, location, brand.
+maintainor, maintainor_store, parking, status, remark, location, brand.
 
 Important data rules:
 - signing_date is stored as text in yyyy-mm-dd or yyyy-mm-dd HH:MM:SS style.
