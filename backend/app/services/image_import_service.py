@@ -1,6 +1,7 @@
 import hashlib
 import json
 from pathlib import Path
+from typing import Any
 
 from app.core.config import settings
 from app.db.session import get_connection
@@ -9,6 +10,7 @@ from app.services.parser_service import parse_order_text
 
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
+_rapid_ocr: Any | None = None
 
 
 def file_hash(path: Path) -> str:
@@ -19,21 +21,92 @@ def file_hash(path: Path) -> str:
     return digest.hexdigest()
 
 
-def extract_text(path: Path) -> tuple[str, str | None]:
+def _extract_text_from_sidecar(path: Path) -> tuple[str, str | None]:
     sidecar = path.with_suffix(".txt")
-    if sidecar.exists():
-        return sidecar.read_text(encoding="utf-8"), None
+    if not sidecar.exists():
+        return "", "未找到同名 txt 识别文件"
+    try:
+        text = sidecar.read_text(encoding="utf-8").strip()
+    except Exception as exc:
+        return "", f"读取同名 txt 失败：{exc}"
+    if not text:
+        return "", "同名 txt 识别文件为空"
+    return text, None
 
+
+def _extract_text_with_rapidocr(path: Path) -> tuple[str, str | None]:
+    global _rapid_ocr
+    try:
+        from rapidocr import RapidOCR  # type: ignore
+    except Exception:
+        return "", "未安装 RapidOCR 组件"
+
+    try:
+        if _rapid_ocr is None:
+            _rapid_ocr = RapidOCR()
+        result = _rapid_ocr(path)
+    except Exception as exc:
+        return "", f"RapidOCR 识别失败：{exc}"
+
+    txts = getattr(result, "txts", None)
+    scores = getattr(result, "scores", None)
+    if txts is None and isinstance(result, (list, tuple)):
+        txts = []
+        scores = []
+        for item in result:
+            if isinstance(item, (list, tuple)) and len(item) >= 2:
+                txts.append(str(item[1]))
+                scores.append(float(item[2]) if len(item) >= 3 else 1.0)
+
+    lines = []
+    for index, text in enumerate(txts or []):
+        score = 1.0
+        if scores is not None and index < len(scores):
+            score = float(scores[index])
+        clean_text = str(text).strip()
+        if clean_text and score >= settings.ocr_min_score:
+            lines.append(clean_text)
+
+    if not lines:
+        return "", "RapidOCR 未识别到有效文字"
+    return "\n".join(lines), None
+
+
+def _extract_text_with_tesseract(path: Path) -> tuple[str, str | None]:
     try:
         import pytesseract  # type: ignore
         from PIL import Image  # type: ignore
     except Exception:
-        return "", "未安装 OCR 组件，且未找到同名 txt 识别文件"
+        return "", "未安装 Tesseract OCR Python 组件"
 
     try:
-        return pytesseract.image_to_string(Image.open(path), lang="chi_sim+eng"), None
+        text = pytesseract.image_to_string(Image.open(path), lang="chi_sim+eng").strip()
     except Exception as exc:
-        return "", f"OCR 识别失败：{exc}"
+        return "", f"Tesseract OCR 识别失败：{exc}"
+    if not text:
+        return "", "Tesseract OCR 未识别到有效文字"
+    return text, None
+
+
+def extract_text(path: Path) -> tuple[str, str | None]:
+    text, error = _extract_text_from_sidecar(path)
+    if error is None:
+        return text, None
+
+    errors = [error]
+    providers = {
+        "rapidocr": [_extract_text_with_rapidocr, _extract_text_with_tesseract],
+        "tesseract": [_extract_text_with_tesseract, _extract_text_with_rapidocr],
+        "sidecar": [],
+    }.get(settings.ocr_provider, [_extract_text_with_rapidocr, _extract_text_with_tesseract])
+
+    for provider in providers:
+        text, error = provider(path)
+        if error is None:
+            return text, None
+        errors.append(error)
+
+    return "", "；".join(errors)
 
 
 def _insert_source_image(
@@ -113,7 +186,7 @@ def scan_images(root: Path | None = None) -> dict:
         parts = image_path.relative_to(root).parts
         if len(parts) < 3:
             digest = file_hash(image_path)
-            _insert_source_image("", "", image_path, digest, "", "failed", error_message="图片目录必须为 城市/日期/图片")
+            _insert_source_image("", "", image_path, digest, "", "failed", error_message="图片目录必须为：城市/日期/图片")
             result["failed"] += 1
             continue
 
@@ -217,4 +290,3 @@ def scan_images(root: Path | None = None) -> dict:
                 conn.commit()
                 result["confirmed"] += 1
     return result
-

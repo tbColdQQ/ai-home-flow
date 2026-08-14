@@ -13,39 +13,90 @@ class ParsedOrder:
         return bool(self.reasons)
 
 
-def _line_after_label(text: str, label: str) -> str | None:
-    match = re.search(rf"{re.escape(label)}\s*[:：]\s*([^\n\r]+)", text)
-    return match.group(1).strip() if match else None
+LABEL_ALIASES = {
+    "residential": ["维护楼盘", "楼盘", "小区"],
+    "price": ["成交价格", "成交价"],
+    "acreage": ["房源面积", "面积"],
+    "CA": ["维护人CA", "维护人 CA", "CA"],
+}
+
+IGNORE_LINES = {
+    "贝壳",
+    "德佑",
+    "房源售出",
+    "贺报",
+    "賀報",
+}
 
 
-def _number_after_label(text: str, label: str) -> float | None:
-    value = _line_after_label(text, label)
+def _normalize_label(line: str) -> str:
+    return re.sub(r"[\s:：]+", "", line)
+
+
+def _clean_value(value: str) -> str:
+    return value.strip().strip(":：").strip()
+
+
+def _line_after_labels(lines: list[str], labels: list[str]) -> str | None:
+    normalized_labels = sorted({_normalize_label(label) for label in labels}, key=len, reverse=True)
+    for index, line in enumerate(lines):
+        normalized_line = _normalize_label(line)
+        for label in normalized_labels:
+            if normalized_line == label:
+                for next_line in lines[index + 1 :]:
+                    value = _clean_value(next_line)
+                    if value:
+                        return value
+    for line in lines:
+        normalized_line = _normalize_label(line)
+        for label in normalized_labels:
+            if normalized_line.startswith(label):
+                value = _clean_value(line[len(label) :])
+                if value:
+                    return value
+    return None
+
+
+def _number_from_value(value: str | None) -> float | None:
     if not value:
         return None
     match = re.search(r"\d+(?:\.\d+)?", value.replace(",", ""))
     return float(match.group(0)) if match else None
 
 
+def _number_after_labels(lines: list[str], labels: list[str]) -> float | None:
+    return _number_from_value(_line_after_labels(lines, labels))
+
+
 def parse_order_text(text: str, city: str, business_date: str) -> ParsedOrder:
     clean_text = "\n".join(line.strip() for line in text.splitlines() if line.strip())
     lines = clean_text.splitlines()
-    residential = _line_after_label(clean_text, "维护楼盘")
-    price = _number_after_label(clean_text, "成交价格")
-    acreage = _number_after_label(clean_text, "房源面积")
-    ca = _line_after_label(clean_text, "维护人CA")
+    label_fragments = [label for aliases in LABEL_ALIASES.values() for label in aliases]
+
+    residential = _line_after_labels(lines, LABEL_ALIASES["residential"])
+    price = _number_after_labels(lines, LABEL_ALIASES["price"])
+    acreage = _number_after_labels(lines, LABEL_ALIASES["acreage"])
+    ca = _line_after_labels(lines, LABEL_ALIASES["CA"])
 
     agent = None
     store = None
     for line in lines:
-        if line in {"贝壳", "德佑", "房源售出", "贺报"}:
+        value = _clean_value(line)
+        if not value or value in IGNORE_LINES:
             continue
-        if any(label in line for label in ["维护楼盘", "成交价格", "房源面积", "维护人CA", "今日房源"]):
+        if any(fragment in value for fragment in label_fragments):
             continue
-        if agent is None and 2 <= len(line) <= 5 and not re.search(r"\d", line):
-            agent = line
+        if any(fragment in value for fragment in ["今日房源", "累计售出", "房源累计"]):
             continue
-        if store is None and line.endswith("店"):
-            store = line
+        if residential and value == residential:
+            continue
+        if ca and value == ca:
+            continue
+        if agent is None and 2 <= len(value) <= 5 and not re.search(r"\d", value):
+            agent = value
+            continue
+        if store is None and value.endswith("店"):
+            store = value
 
     data = {
         "city": city,
@@ -79,4 +130,3 @@ def parse_order_text(text: str, city: str, business_date: str) -> ParsedOrder:
         if not data.get(field):
             reasons.append(reason)
     return ParsedOrder(data=data, confidence=confidence, reasons=reasons)
-
