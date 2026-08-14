@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import * as echarts from 'echarts'
 
 const apiBase = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
@@ -342,6 +342,13 @@ async function changeDutyMonth() {
   await loadDuty()
 }
 
+async function syncDutyMonthFromCalendar(value) {
+  const nextMonth = formatDate(value).slice(0, 7)
+  if (nextMonth === dutyMonth.value) return
+  dutyMonth.value = nextMonth
+  await loadDuty()
+}
+
 async function saveDutyRoster() {
   try {
     const user_ids = dutyRoster.value.map((item) => Number(item.id)).filter(Boolean)
@@ -371,9 +378,9 @@ function moveDutyRoster(index, delta) {
 
 function openDutyDate(dateText) {
   const day = dutyDayMap.value[dateText]
-  if (!isStoreManager.value || !day) return
-  selectedDutyDay.value = day
-  selectedDutyUserId.value = day.user_id
+  if (!isStoreManager.value) return
+  selectedDutyDay.value = day || { date: dateText, display_name: '', user_id: null }
+  selectedDutyUserId.value = day?.user_id || dutyRoster.value[0]?.id || null
 }
 
 function closeDutyDialog() {
@@ -873,6 +880,10 @@ onMounted(async () => {
     }
   }
 })
+
+watch(dutyCalendarDate, (value) => {
+  if (isLoggedIn.value) syncDutyMonthFromCalendar(value)
+})
 </script>
 
 <template>
@@ -935,15 +946,11 @@ onMounted(async () => {
         <section class="panel">
           <div class="panel-header">
             <h2>值班日历</h2>
-            <div class="actions">
-              <input v-model="dutyMonth" type="month" @change="changeDutyMonth" />
-              <button class="secondary" @click="loadDuty">刷新</button>
-            </div>
           </div>
           <div v-if="isStoreManager" class="duty-roster-editor">
             <div>
               <strong>值班排序</strong>
-              <span>按店员 ID 逗号分隔，系统按顺序每日轮换。</span>
+              <span>按上移/下移调整顺序，系统按顺序每日轮换。</span>
             </div>
             <el-table :data="dutyRoster" size="small" border>
               <el-table-column prop="sort_order" label="顺序" width="80" />
@@ -957,10 +964,6 @@ onMounted(async () => {
             </el-table>
             <button @click="saveDutyRoster">保存排序</button>
           </div>
-          <div class="duty-roster">
-            <span v-for="item in dutyRoster" :key="item.id">{{ item.sort_order }}. {{ item.display_name }}（ID {{ item.id }}）</span>
-            <span v-if="!dutyRoster.length">暂无可排班店员</span>
-          </div>
           <div class="today-duty" v-if="todayDuty">
             今日值班：<strong>{{ todayDuty.display_name || '未排班' }}</strong>
           </div>
@@ -969,7 +972,7 @@ onMounted(async () => {
               <button
                 class="duty-date-cell"
                 :class="{ today: isDutyToday(data.day), override: dutyCellDay(data)?.is_override }"
-                @click="openDutyDate(data.day)"
+                @click.stop="openDutyDate(data.day)"
               >
                 <span>{{ Number(data.day.slice(-2)) }}</span>
                 <strong>{{ dutyCellDay(data)?.display_name || '未排班' }}</strong>
