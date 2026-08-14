@@ -21,9 +21,9 @@ class AssignmentRequest(BaseModel):
     user_id: int
 
 
-def ensure_store_manager(user: CurrentUser) -> None:
-    if "store_manager" not in user.role_codes:
-        raise HTTPException(status_code=403, detail="只有店长可以维护值班")
+def ensure_duty_editor(user: CurrentUser) -> None:
+    if not {"admin", "store_manager"}.intersection(user.role_codes):
+        raise HTTPException(status_code=403, detail="只有店长和管理员可以维护值班")
     if user.store_id is None:
         raise HTTPException(status_code=400, detail="当前用户未绑定门店")
 
@@ -54,7 +54,7 @@ def roster(user: CurrentUser = Depends(current_user)) -> list[dict]:
 
 @router.put("/roster")
 def update_roster(body: RosterRequest, user: CurrentUser = Depends(current_user)) -> dict:
-    ensure_store_manager(user)
+    ensure_duty_editor(user)
     with get_connection() as conn:
         try:
             roster = set_roster(conn, user.city, user.store_id, body.user_ids)
@@ -66,7 +66,7 @@ def update_roster(body: RosterRequest, user: CurrentUser = Depends(current_user)
 
 @router.put("/assignment")
 def update_assignment(body: AssignmentRequest, user: CurrentUser = Depends(current_user)) -> dict[str, str]:
-    ensure_store_manager(user)
+    ensure_duty_editor(user)
     with get_connection() as conn:
         try:
             set_assignment(conn, user.city, user.store_id, body.duty_date, body.user_id, user.id)

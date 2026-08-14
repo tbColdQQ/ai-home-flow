@@ -441,11 +441,11 @@ th {
   padding: 0;
 }
 
-button.duty-date-cell {
+.duty-date-cell {
   width: 100%;
   height: 100%;
   display: grid;
-  align-content: start;
+  grid-template-rows: auto 1fr auto;
   gap: 6px;
   padding: 10px;
   border: 1px solid transparent;
@@ -456,24 +456,21 @@ button.duty-date-cell {
   text-align: left;
 }
 
-button.duty-date-cell span {
-  width: 28px;
-  height: 28px;
-  display: inline-grid;
-  place-items: center;
+.duty-date-cell span {
+  display: inline;
   color: #334155;
   font-weight: 600;
-  border-radius: 999px;
-  background: #f1f5f9;
+  background: transparent;
 }
 
-button.duty-date-cell strong {
+.duty-date-cell strong {
+  align-self: end;
   color: #0f172a;
   font-size: 14px;
   line-height: 1.35;
 }
 
-button.duty-date-cell em {
+.duty-date-cell em {
   width: fit-content;
   padding: 2px 6px;
   color: #1d4ed8;
@@ -483,39 +480,39 @@ button.duty-date-cell em {
   border-radius: 999px;
 }
 
-button.duty-date-cell:hover {
+.duty-date-cell:hover {
   background: #f8fafc;
   border-color: #93c5fd;
 }
 
-button.duty-date-cell.today {
+.duty-date-cell.today {
   background: #eff6ff;
   border-color: #2563eb;
 }
 
-button.duty-date-cell.today span {
-  color: #fff;
-  background: #2563eb;
+.duty-date-cell.today span {
+  color: #2563eb;
+  background: transparent;
 }
 
-button.duty-date-cell.override {
+.duty-date-cell.override {
   background: #fff7ed;
   border-color: #fb923c;
 }
 
-.duty-calendar .el-calendar-table td.prev button.duty-date-cell,
-.duty-calendar .el-calendar-table td.next button.duty-date-cell {
+.duty-calendar .el-calendar-table td.prev .duty-date-cell,
+.duty-calendar .el-calendar-table td.next .duty-date-cell {
   background: #f8fafc;
 }
 
-.duty-calendar .el-calendar-table td.prev button.duty-date-cell span,
-.duty-calendar .el-calendar-table td.next button.duty-date-cell span {
+.duty-calendar .el-calendar-table td.prev .duty-date-cell span,
+.duty-calendar .el-calendar-table td.next .duty-date-cell span {
   color: #94a3b8;
-  background: #e2e8f0;
+  background: transparent;
 }
 
-.duty-calendar .el-calendar-table td.prev button.duty-date-cell strong,
-.duty-calendar .el-calendar-table td.next button.duty-date-cell strong {
+.duty-calendar .el-calendar-table td.prev .duty-date-cell strong,
+.duty-calendar .el-calendar-table td.next .duty-date-cell strong {
   color: #475569;
 }
 

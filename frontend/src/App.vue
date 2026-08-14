@@ -74,6 +74,7 @@ const isStoreManager = computed(() => user.value?.roles?.includes('store_manager
 const canHandleTasks = computed(() => user.value?.roles?.some((role) => ['admin', 'store_manager'].includes(role)))
 const canManageUsers = computed(() => isAdmin.value || isStoreManager.value)
 const canEditOrders = computed(() => isAdmin.value || isStoreManager.value)
+const canEditDuty = computed(() => isAdmin.value || isStoreManager.value)
 const canManageLeases = computed(() => user.value?.roles?.some((role) => ['admin', 'rental_agent'].includes(role)))
 const totalPages = computed(() => Math.max(1, Math.ceil(orderTotal.value / orderPageSize.value)))
 const leaseTotalPages = computed(() => Math.max(1, Math.ceil(leaseTotal.value / leasePageSize.value)))
@@ -362,7 +363,7 @@ async function saveDutyRoster() {
 }
 
 function openDutyDay(day) {
-  if (!isStoreManager.value || !day.user_id) return
+  if (!canEditDuty.value || !day.user_id) return
   selectedDutyDay.value = day
   selectedDutyUserId.value = day.user_id
 }
@@ -378,7 +379,7 @@ function moveDutyRoster(index, delta) {
 
 function openDutyDate(dateText) {
   const day = dutyDayMap.value[dateText]
-  if (!isStoreManager.value) return
+  if (!canEditDuty.value) return
   selectedDutyDay.value = day || { date: dateText, display_name: '', user_id: null }
   selectedDutyUserId.value = day?.user_id || dutyRoster.value[0]?.id || null
 }
@@ -947,7 +948,7 @@ watch(dutyCalendarDate, (value) => {
           <div class="panel-header">
             <h2>值班日历</h2>
           </div>
-          <div v-if="isStoreManager" class="duty-roster-editor">
+          <div v-if="canEditDuty" class="duty-roster-editor">
             <div>
               <strong>值班排序</strong>
               <span>按上移/下移调整顺序，系统按顺序每日轮换。</span>
@@ -969,15 +970,17 @@ watch(dutyCalendarDate, (value) => {
           </div>
           <el-calendar v-model="dutyCalendarDate" class="duty-calendar">
             <template #date-cell="{ data }">
-              <button
+              <div
                 class="duty-date-cell"
                 :class="{ today: isDutyToday(data.day), override: dutyCellDay(data)?.is_override }"
                 @click.stop="openDutyDate(data.day)"
+                @keyup.enter="openDutyDate(data.day)"
+                tabindex="0"
               >
                 <span>{{ Number(data.day.slice(-2)) }}</span>
                 <strong>{{ dutyCellDay(data)?.display_name || '未排班' }}</strong>
                 <em v-if="dutyCellDay(data)?.is_override">已调整</em>
-              </button>
+              </div>
             </template>
           </el-calendar>
         </section>
