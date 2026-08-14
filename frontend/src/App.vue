@@ -46,6 +46,9 @@ const permissionForm = ref({ id: null, code: '', name: '', permission_type: 'api
 const chartRef = ref(null)
 const excelInputRef = ref(null)
 const importing = ref(false)
+const showScanDialog = ref(false)
+const scanDate = ref(new Date().toISOString().slice(0, 10))
+const isScanning = ref(false)
 
 const isLoggedIn = computed(() => Boolean(token.value && user.value))
 const isAdmin = computed(() => user.value?.roles?.includes('admin'))
@@ -345,13 +348,29 @@ async function deleteOrder(item) {
   }
 }
 
+function openScanDialog() {
+  showScanDialog.value = true
+}
+
+function closeScanDialog() {
+  showScanDialog.value = false
+}
+
 async function scanImages() {
+  if (!scanDate.value || isScanning.value) return
+  isScanning.value = true
   try {
-    const data = await api('/api/images/scan', { method: 'POST' })
-    message.value = `扫描完成：已扫描 ${data.scanned} 张，入库 ${data.confirmed} 条，待确认 ${data.pending} 条`
+    const data = await api('/api/images/scan', {
+      method: 'POST',
+      body: JSON.stringify({ business_date: scanDate.value }),
+    })
+    message.value = `扫描完成：日期 ${scanDate.value}，已扫描 ${data.scanned} 张，入库 ${data.confirmed} 条，合并 ${data.merged ?? 0} 条，待确认 ${data.pending} 条，跳过 ${data.skipped} 张，失败 ${data.failed} 张`
+    showScanDialog.value = false
     await loadAll()
   } catch (error) {
     message.value = error.message
+  } finally {
+    isScanning.value = false
   }
 }
 
@@ -615,7 +634,7 @@ onMounted(async () => {
           <p>{{ user.display_name }} · {{ user.roles.join(', ') }}</p>
         </div>
         <div class="actions">
-          <button v-if="canHandleTasks" @click="scanImages">扫描图片</button>
+          <button v-if="canHandleTasks" @click="openScanDialog">扫描图片</button>
           <button class="secondary" @click="logout()">退出</button>
         </div>
       </header>
@@ -870,6 +889,27 @@ onMounted(async () => {
         </div>
       </section>
     </section>
+
+    <div v-if="showScanDialog" class="dialog-backdrop" @click.self="closeScanDialog">
+      <section class="dialog small-dialog">
+        <div class="panel-header">
+          <h2>选择扫描日期</h2>
+          <button class="secondary" @click="closeScanDialog">关闭</button>
+        </div>
+        <div class="form-grid single">
+          <label>
+            图片日期
+            <input v-model="scanDate" type="date" />
+          </label>
+        </div>
+        <div class="actions">
+          <button :disabled="!scanDate || isScanning" @click="scanImages">
+            {{ isScanning ? '扫描中...' : '开始扫描' }}
+          </button>
+          <button class="secondary" :disabled="isScanning" @click="closeScanDialog">取消</button>
+        </div>
+      </section>
+    </div>
 
     <div v-if="selectedOrder" class="dialog-backdrop" @click.self="closeOrderDialog">
       <section class="dialog">

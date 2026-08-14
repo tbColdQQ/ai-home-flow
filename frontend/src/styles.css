@@ -433,8 +433,16 @@ th {
   box-shadow: 0 18px 55px rgba(15, 23, 42, 0.16);
 }
 
+.small-dialog {
+  width: min(420px, 100%);
+}
+
 .panel table {
   margin-top: 12px;
+}
+
+.form-grid.single {
+  grid-template-columns: 1fr;
 }
 
 @media (max-width: 860px) {

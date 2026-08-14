@@ -440,26 +440,36 @@ def _confirm_parsed_image(
     return order_id
 
 
-def scan_images(root: Path | None = None) -> dict:
+def scan_images(root: Path | None = None, city: str | None = None, business_date: str | None = None) -> dict:
     root = root or settings.image_root
     root.mkdir(parents=True, exist_ok=True)
     result = {"scanned": 0, "confirmed": 0, "merged": 0, "pending": 0, "skipped": 0, "failed": 0}
+    scan_root = root
+    fixed_city = city
+    fixed_business_date = business_date
+    if city and business_date:
+        scan_root = root / city / business_date
+        result["target_dir"] = str(scan_root)
+        if not scan_root.exists():
+            return result
 
-    for image_path in root.rglob("*"):
+    for image_path in scan_root.rglob("*"):
         if not image_path.is_file() or image_path.suffix.lower() not in IMAGE_EXTENSIONS:
             continue
 
         result["scanned"] += 1
         parts = image_path.relative_to(root).parts
         digest = file_hash(image_path)
-        if len(parts) < 3:
+        if fixed_city and fixed_business_date:
+            city, business_date = fixed_city, fixed_business_date
+        elif len(parts) >= 3:
+            city, business_date = parts[0], parts[1]
+        else:
             with get_connection() as conn:
                 _insert_source_image(conn, "", "", image_path, digest, "", "failed", error_message="图片目录必须为：城市/日期/图片")
                 conn.commit()
             result["failed"] += 1
             continue
-
-        city, business_date = parts[0], parts[1]
         with get_connection() as conn:
             exists = conn.execute(
                 "SELECT id, status, related_order_id FROM source_images WHERE file_hash = ?",
