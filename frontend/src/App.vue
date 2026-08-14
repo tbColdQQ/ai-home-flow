@@ -911,15 +911,18 @@ watch(dutyCalendarDate, (value) => {
         <strong>home-flow</strong>
         <span>{{ user.city }}</span>
       </div>
-      <button
-        v-for="menu in menus"
-        :key="menu.key"
-        class="nav-item"
-        :class="{ active: activePage === menu.key }"
-        @click="activePage = menu.key"
+      <el-menu
+        class="sidebar-menu"
+        :default-active="activePage"
+        background-color="#101827"
+        text-color="#d6deeb"
+        active-text-color="#ffffff"
+        @select="activePage = $event"
       >
-        {{ menu.label }}
-      </button>
+        <el-menu-item v-for="menu in menus" :key="menu.key" :index="menu.key">
+          <span>{{ menu.label }}</span>
+        </el-menu-item>
+      </el-menu>
     </aside>
 
     <section class="workspace">
@@ -929,7 +932,7 @@ watch(dutyCalendarDate, (value) => {
           <p>{{ user.display_name }} · {{ user.roles.join(', ') }}</p>
         </div>
         <div class="actions">
-          <button v-if="canHandleTasks" @click="openScanDialog">扫描图片</button>
+          <button v-if="activePage === 'dashboard' && canHandleTasks" @click="openScanDialog">扫描图片</button>
           <button class="secondary" @click="logout()">退出</button>
         </div>
       </header>
@@ -940,9 +943,27 @@ watch(dutyCalendarDate, (value) => {
         <div class="cards">
           <article class="metric"><span>成交记录</span><strong>{{ overview.orders ?? orderTotal }}</strong></article>
           <article class="metric"><span>待办</span><strong>{{ overview.pending_tasks ?? tasks.length }}</strong></article>
-          <article class="metric"><span>用户</span><strong>{{ overview.users ?? '-' }}</strong></article>
-          <article class="metric"><span>角色</span><strong>{{ overview.roles ?? '-' }}</strong></article>
+          <article v-if="isAdmin" class="metric"><span>用户</span><strong>{{ overview.users ?? '-' }}</strong></article>
+          <article v-if="isAdmin" class="metric"><span>角色</span><strong>{{ overview.roles ?? '-' }}</strong></article>
         </div>
+
+        <section class="panel">
+          <div class="panel-header">
+            <h2>每日待办</h2>
+            <button class="secondary" @click="loadTasks">刷新</button>
+          </div>
+          <div v-if="!tasks.length" class="empty">暂无待办</div>
+          <div v-for="task in tasks" :key="task.id" class="task">
+            <div>
+              <strong>{{ task.title }}</strong>
+              <span>{{ task.city }} · {{ task.file_name || task.source_type }} · {{ task.reason }}</span>
+            </div>
+            <div v-if="canHandleTasks" class="row-actions">
+              <button class="small secondary" @click="openTask(task)">修改/确认</button>
+              <button class="small danger" @click="deleteTask(task)">删除</button>
+            </div>
+          </div>
+        </section>
 
         <section class="panel">
           <div class="panel-header">
@@ -954,12 +975,14 @@ watch(dutyCalendarDate, (value) => {
               <span>按上移/下移调整顺序，系统按顺序每日轮换。</span>
             </div>
             <el-table :data="dutyRoster" size="small" border>
-              <el-table-column prop="sort_order" label="顺序" width="80" />
-              <el-table-column prop="display_name" label="店员" min-width="140" />
-              <el-table-column label="操作" width="150">
+              <el-table-column prop="sort_order" label="顺序" width="72" />
+              <el-table-column prop="display_name" label="店员" width="160" />
+              <el-table-column label="操作" min-width="170">
                 <template #default="{ $index }">
-                  <el-button size="small" :disabled="$index === 0" @click="moveDutyRoster($index, -1)">上移</el-button>
-                  <el-button size="small" :disabled="$index === dutyRoster.length - 1" @click="moveDutyRoster($index, 1)">下移</el-button>
+                  <div class="roster-actions">
+                    <el-button size="small" :disabled="$index === 0" @click="moveDutyRoster($index, -1)">上移</el-button>
+                    <el-button size="small" :disabled="$index === dutyRoster.length - 1" @click="moveDutyRoster($index, 1)">下移</el-button>
+                  </div>
                 </template>
               </el-table-column>
             </el-table>
@@ -985,23 +1008,6 @@ watch(dutyCalendarDate, (value) => {
           </el-calendar>
         </section>
 
-        <section class="panel">
-          <div class="panel-header">
-            <h2>每日待办</h2>
-            <button class="secondary" @click="loadTasks">刷新</button>
-          </div>
-          <div v-if="!tasks.length" class="empty">暂无待办</div>
-          <div v-for="task in tasks" :key="task.id" class="task">
-            <div>
-              <strong>{{ task.title }}</strong>
-              <span>{{ task.city }} · {{ task.file_name || task.source_type }} · {{ task.reason }}</span>
-            </div>
-            <div v-if="canHandleTasks" class="row-actions">
-              <button class="small secondary" @click="openTask(task)">修改/确认</button>
-              <button class="small danger" @click="deleteTask(task)">删除</button>
-            </div>
-          </div>
-        </section>
       </section>
 
       <section v-if="activePage === 'orders'" class="panel">

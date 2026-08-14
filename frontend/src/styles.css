@@ -108,9 +108,6 @@ p {
 }
 
 .sidebar {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
   padding: 18px;
   border-right: 1px solid #dde5f2;
   background: #101827;
@@ -132,18 +129,20 @@ p {
   font-size: 13px;
 }
 
-.nav-item {
-  width: 100%;
-  justify-content: flex-start;
-  border-color: transparent;
-  color: #d6deeb;
+.sidebar-menu {
+  border-right: 0;
   background: transparent;
-  text-align: left;
 }
 
-.nav-item.active,
-.nav-item:hover {
-  color: #fff;
+.sidebar-menu .el-menu-item {
+  height: 42px;
+  margin-bottom: 8px;
+  border-radius: 6px;
+  font-size: 15px;
+}
+
+.sidebar-menu .el-menu-item.is-active,
+.sidebar-menu .el-menu-item:hover {
   background: #2563eb;
 }
 
@@ -178,6 +177,17 @@ p {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+  align-items: center;
+}
+
+.roster-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.roster-actions .el-button + .el-button {
+  margin-left: 0;
 }
 
 .notice {
@@ -191,7 +201,7 @@ p {
 
 .cards {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 14px;
 }
 
@@ -521,6 +531,30 @@ th {
   margin-top: 12px;
 }
 
+.el-table .caret-wrapper {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  flex-direction: column;
+  justify-content: center;
+  margin-left: 4px;
+  padding: 0;
+  border: 0;
+  color: var(--el-text-color-secondary);
+  background: transparent;
+  vertical-align: middle;
+}
+
+.el-table .sort-caret {
+  left: auto;
+}
+
+.el-table th.el-table__cell > .cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .element-pagination {
   justify-content: flex-end;
   margin-top: 14px;
@@ -598,7 +632,6 @@ th {
     position: sticky;
     top: 0;
     z-index: 2;
-    flex-direction: row;
     overflow-x: auto;
   }
 
@@ -607,9 +640,15 @@ th {
     margin-bottom: 0;
   }
 
-  .nav-item {
+  .sidebar-menu {
+    display: flex;
+    min-width: max-content;
+  }
+
+  .sidebar-menu .el-menu-item {
     min-width: 92px;
-    text-align: center;
+    justify-content: center;
+    margin: 0 8px 0 0;
   }
 
   .workspace {
