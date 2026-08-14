@@ -67,6 +67,37 @@ def migrate() -> None:
 
         conn.executescript(
             """
+            CREATE TABLE IF NOT EXISTS lease_properties (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                city TEXT,
+                community_name TEXT,
+                address TEXT,
+                acreage REAL,
+                price REAL,
+                listing_date TEXT,
+                rental_type TEXT,
+                recorder TEXT,
+                maintainor TEXT,
+                has_key INTEGER CHECK(has_key IN (0, 1)),
+                agent TEXT,
+                deal_date TEXT,
+                lease_expire_date TEXT,
+                cancel_time TEXT,
+                cancel_reason TEXT,
+                for_sale INTEGER CHECK(for_sale IN (0, 1)),
+                owner_phone TEXT,
+                customer_phone TEXT,
+                status TEXT NOT NULL DEFAULT 'active',
+                creator TEXT,
+                create_time TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                modifier TEXT,
+                modify_time TEXT
+            );
+            """
+        )
+
+        conn.executescript(
+            """
             CREATE TABLE IF NOT EXISTS cities (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL UNIQUE,
@@ -261,6 +292,10 @@ def migrate() -> None:
             CREATE INDEX IF NOT EXISTS idx_orders_city_agent ON orders(city, agent);
             CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
             CREATE INDEX IF NOT EXISTS idx_orders_review_status ON orders(review_status);
+            CREATE INDEX IF NOT EXISTS idx_lease_city_community ON lease_properties(city, community_name);
+            CREATE INDEX IF NOT EXISTS idx_lease_city_price ON lease_properties(city, price);
+            CREATE INDEX IF NOT EXISTS idx_lease_city_expire ON lease_properties(city, lease_expire_date);
+            CREATE INDEX IF NOT EXISTS idx_lease_status ON lease_properties(status);
             CREATE INDEX IF NOT EXISTS idx_source_images_city_date ON source_images(city, business_date);
             CREATE INDEX IF NOT EXISTS idx_task_items_status ON task_items(status);
             CREATE INDEX IF NOT EXISTS idx_task_items_city_status ON task_items(city, status);
@@ -294,6 +329,7 @@ def migrate() -> None:
         role_permissions = {
             "clerk": ["orders:read", "qa:ask"],
             "store_manager": ["orders:read", "qa:ask", "images:import", "tasks:handle"],
+            "rental_agent": ["leases:manage"],
             "admin": ["orders:read", "qa:ask", "images:import", "tasks:handle", "users:manage"],
         }
         for role_code, permission_codes in role_permissions.items():
@@ -307,4 +343,25 @@ def migrate() -> None:
                         "INSERT OR IGNORE INTO role_permissions(role_id, permission_id) VALUES (?, ?)",
                         (role["id"], permission["id"]),
                     )
+        conn.execute(
+            "INSERT OR IGNORE INTO roles(code, name, description) VALUES (?, ?, ?)",
+            ("rental_agent", "租赁经纪人", "管理租赁房源数据"),
+        )
+        conn.execute(
+            "INSERT OR IGNORE INTO permissions(code, name, permission_type, description) VALUES (?, ?, ?, ?)",
+            ("leases:manage", "租赁房源管理", "api", "新增、导入、编辑和删除租赁房源"),
+        )
+        role = conn.execute("SELECT id FROM roles WHERE code = ?", ("rental_agent",)).fetchone()
+        permission = conn.execute("SELECT id FROM permissions WHERE code = ?", ("leases:manage",)).fetchone()
+        if role and permission:
+            conn.execute(
+                "INSERT OR IGNORE INTO role_permissions(role_id, permission_id) VALUES (?, ?)",
+                (role["id"], permission["id"]),
+            )
+        admin_role = conn.execute("SELECT id FROM roles WHERE code = ?", ("admin",)).fetchone()
+        if admin_role and permission:
+            conn.execute(
+                "INSERT OR IGNORE INTO role_permissions(role_id, permission_id) VALUES (?, ?)",
+                (admin_role["id"], permission["id"]),
+            )
         conn.commit()

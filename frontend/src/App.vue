@@ -15,6 +15,14 @@ const orders = ref([])
 const orderTotal = ref(0)
 const orderPage = ref(1)
 const orderPageSize = ref(20)
+const leases = ref([])
+const leaseTotal = ref(0)
+const leasePage = ref(1)
+const leasePageSize = ref(20)
+const leaseFilters = ref({ community_name: '', price_min: '', price_max: '', sort_by: 'lease_expire_date', sort_order: 'asc' })
+const selectedLease = ref(null)
+const leaseDialogMode = ref('detail')
+const leaseForm = ref({})
 const orderFilters = ref({
   start_date: '',
   end_date: '',
@@ -45,7 +53,9 @@ const roleForm = ref({ id: null, code: '', name: '', description: '', permission
 const permissionForm = ref({ id: null, code: '', name: '', permission_type: 'api', description: '' })
 const chartRef = ref(null)
 const excelInputRef = ref(null)
+const leaseExcelInputRef = ref(null)
 const importing = ref(false)
+const importingLeases = ref(false)
 const showScanDialog = ref(false)
 const scanDate = ref(new Date().toISOString().slice(0, 10))
 const isScanning = ref(false)
@@ -56,11 +66,14 @@ const isStoreManager = computed(() => user.value?.roles?.includes('store_manager
 const canHandleTasks = computed(() => user.value?.roles?.some((role) => ['admin', 'store_manager'].includes(role)))
 const canManageUsers = computed(() => isAdmin.value || isStoreManager.value)
 const canEditOrders = computed(() => isAdmin.value || isStoreManager.value)
+const canManageLeases = computed(() => user.value?.roles?.some((role) => ['admin', 'rental_agent'].includes(role)))
 const totalPages = computed(() => Math.max(1, Math.ceil(orderTotal.value / orderPageSize.value)))
+const leaseTotalPages = computed(() => Math.max(1, Math.ceil(leaseTotal.value / leasePageSize.value)))
 
 const menus = computed(() => [
   { key: 'dashboard', label: '首页' },
   { key: 'orders', label: '成交数据' },
+  ...(canManageLeases.value ? [{ key: 'leases', label: '租赁房源' }] : []),
   { key: 'qa', label: '智能问答' },
   ...(canHandleTasks.value ? [{ key: 'tasks', label: '每日待办' }] : []),
   ...(canManageUsers.value ? [{ key: 'admin', label: isAdmin.value ? '权限管理' : '用户管理' }] : []),
@@ -83,6 +96,24 @@ const orderFields = [
   ['CA', 'CA', 'text'],
   ['location', '位置', 'text'],
   ['remark', '备注', 'text'],
+]
+
+const leaseFields = [
+  ['community_name', '小区名称', 'text'],
+  ['address', '房源地址', 'text'],
+  ['acreage', '面积', 'number'],
+  ['price', '价格', 'number'],
+  ['listing_date', '挂牌时间', 'text'],
+  ['rental_type', '出租方式', 'text'],
+  ['recorder', '录入人', 'text'],
+  ['maintainor', '维护人', 'text'],
+  ['agent', '成交人', 'text'],
+  ['deal_date', '成交日期', 'date'],
+  ['lease_expire_date', '租期到期时间', 'date'],
+  ['cancel_time', '核销时间', 'date'],
+  ['cancel_reason', '核销原因', 'text'],
+  ['owner_phone', '业主电话', 'text'],
+  ['customer_phone', '客户电话', 'text'],
 ]
 
 function authHeaders() {
@@ -171,6 +202,23 @@ async function loadOrders() {
   orderPageSize.value = data.page_size
 }
 
+async function loadLeases() {
+  if (!canManageLeases.value) return
+  const params = new URLSearchParams()
+  params.set('page', leasePage.value)
+  params.set('page_size', leasePageSize.value)
+  appendParam(params, 'community_name', leaseFilters.value.community_name)
+  appendParam(params, 'price_min', leaseFilters.value.price_min)
+  appendParam(params, 'price_max', leaseFilters.value.price_max)
+  appendParam(params, 'sort_by', leaseFilters.value.sort_by)
+  appendParam(params, 'sort_order', leaseFilters.value.sort_order)
+  const data = await api(`/api/leases?${params.toString()}`)
+  leases.value = data.items
+  leaseTotal.value = data.total
+  leasePage.value = data.page
+  leasePageSize.value = data.page_size
+}
+
 async function loadTasks() {
   if (canHandleTasks.value) tasks.value = await api('/api/tasks')
 }
@@ -197,7 +245,7 @@ async function loadAdminData() {
 
 async function loadAll() {
   message.value = ''
-  await Promise.all([loadOrders(), loadTasks(), loadAdminData()])
+  await Promise.all([loadOrders(), loadLeases(), loadTasks(), loadAdminData()])
 }
 
 async function applyOrderFilters() {
@@ -231,6 +279,27 @@ async function changeOrderPageSize() {
   await loadOrders()
 }
 
+async function applyLeaseFilters() {
+  leasePage.value = 1
+  await loadLeases()
+}
+
+async function resetLeaseFilters() {
+  leaseFilters.value = { community_name: '', price_min: '', price_max: '', sort_by: 'lease_expire_date', sort_order: 'asc' }
+  leasePage.value = 1
+  await loadLeases()
+}
+
+async function changeLeasePage(nextPage) {
+  leasePage.value = Math.min(Math.max(nextPage, 1), leaseTotalPages.value)
+  await loadLeases()
+}
+
+async function changeLeasePageSize() {
+  leasePage.value = 1
+  await loadLeases()
+}
+
 async function openOrder(item, mode = 'detail') {
   const detail = await api(`/api/orders/${item.ID}`)
   selectedOrder.value = detail
@@ -241,6 +310,89 @@ async function openOrder(item, mode = 'detail') {
 function closeOrderDialog() {
   selectedOrder.value = null
   orderForm.value = {}
+}
+
+function newLease() {
+  selectedLease.value = { id: null }
+  leaseDialogMode.value = 'edit'
+  leaseForm.value = { has_key: 0, for_sale: 0 }
+}
+
+async function openLease(item, mode = 'detail') {
+  const detail = await api(`/api/leases/${item.id}`)
+  selectedLease.value = detail
+  leaseDialogMode.value = mode
+  leaseForm.value = { ...detail }
+}
+
+function closeLeaseDialog() {
+  selectedLease.value = null
+  leaseForm.value = {}
+}
+
+async function saveLease() {
+  try {
+    const payload = { ...leaseForm.value }
+    delete payload.id
+    const path = selectedLease.value?.id ? `/api/leases/${selectedLease.value.id}` : '/api/leases'
+    const method = selectedLease.value?.id ? 'PUT' : 'POST'
+    const saved = await api(path, { method, body: JSON.stringify(payload) })
+    message.value = selectedLease.value?.id ? '租赁房源已保存' : '租赁房源已添加'
+    if (saved.id) {
+      closeLeaseDialog()
+    } else {
+      selectedLease.value = saved
+      leaseForm.value = { ...saved }
+      leaseDialogMode.value = 'detail'
+    }
+    await loadLeases()
+  } catch (error) {
+    message.value = error.message
+  }
+}
+
+async function deleteLease(item = selectedLease.value) {
+  if (!item) return
+  if (!window.confirm(`确认删除租赁房源 ${item.community_name || ''} ${item.address || ''}？`)) return
+  if (!window.confirm('删除后列表中将不再显示，是否继续？')) return
+  try {
+    await api(`/api/leases/${item.id}`, { method: 'DELETE' })
+    message.value = '租赁房源已删除'
+    closeLeaseDialog()
+    await loadLeases()
+  } catch (error) {
+    message.value = error.message
+  }
+}
+
+function chooseLeaseExcel() {
+  leaseExcelInputRef.value?.click()
+}
+
+async function uploadLeaseExcel(event) {
+  const file = event.target.files?.[0]
+  event.target.value = ''
+  if (!file) return
+  importingLeases.value = true
+  message.value = ''
+  try {
+    const form = new FormData()
+    form.append('file', file)
+    const res = await fetch(`${apiBase}/api/leases/import-excel`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token.value}` },
+      body: form,
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.detail || '导入失败')
+    message.value = `租赁房源导入完成：共 ${data.total} 行，成功 ${data.success} 行，跳过 ${data.skipped} 行，失败 ${data.failed} 行`
+    leasePage.value = 1
+    await loadLeases()
+  } catch (error) {
+    message.value = error.message
+  } finally {
+    importingLeases.value = false
+  }
 }
 
 function taskPayload(item) {
@@ -724,6 +876,91 @@ onMounted(async () => {
         </div>
       </section>
 
+      <section v-if="activePage === 'leases'" class="panel">
+        <div class="panel-header">
+          <h2>租赁房源</h2>
+          <div class="actions">
+            <input ref="leaseExcelInputRef" class="hidden-input" type="file" accept=".xlsx" @change="uploadLeaseExcel" />
+            <button @click="newLease">添加房源</button>
+            <button class="secondary" :disabled="importingLeases" @click="chooseLeaseExcel">
+              {{ importingLeases ? '导入中...' : '导入房源数据' }}
+            </button>
+          </div>
+        </div>
+
+        <section class="filters">
+          <label>小区<input v-model="leaseFilters.community_name" placeholder="小区名称" @keyup.enter="applyLeaseFilters" /></label>
+          <label>价格下限<input v-model="leaseFilters.price_min" type="number" min="0" placeholder="元/月" /></label>
+          <label>价格上限<input v-model="leaseFilters.price_max" type="number" min="0" placeholder="元/月" /></label>
+          <label>
+            排序字段
+            <select v-model="leaseFilters.sort_by">
+              <option value="lease_expire_date">租期到期时间</option>
+              <option value="price">价格</option>
+            </select>
+          </label>
+          <label>
+            排序方式
+            <select v-model="leaseFilters.sort_order">
+              <option value="asc">升序</option>
+              <option value="desc">降序</option>
+            </select>
+          </label>
+          <div class="filter-actions">
+            <button @click="applyLeaseFilters">筛选</button>
+            <button class="secondary" @click="resetLeaseFilters">重置</button>
+          </div>
+        </section>
+
+        <div class="table-meta">
+          <span>共 {{ leaseTotal }} 条</span>
+          <select v-model.number="leasePageSize" @change="changeLeasePageSize">
+            <option :value="20">20 条/页</option>
+            <option :value="50">50 条/页</option>
+            <option :value="100">100 条/页</option>
+          </select>
+        </div>
+
+        <table>
+          <thead>
+            <tr>
+              <th>小区</th>
+              <th>地址</th>
+              <th>面积</th>
+              <th>价格</th>
+              <th>出租方式</th>
+              <th>成交人</th>
+              <th>租期到期</th>
+              <th>钥匙</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="item in leases" :key="item.id">
+              <td>{{ item.community_name }}</td>
+              <td>{{ item.address }}</td>
+              <td>{{ item.acreage }}</td>
+              <td>{{ item.price }}</td>
+              <td>{{ item.rental_type }}</td>
+              <td>{{ item.agent }}</td>
+              <td>{{ item.lease_expire_date }}</td>
+              <td>{{ item.has_key ? '是' : '否' }}</td>
+              <td class="row-actions">
+                <button class="small secondary" @click="openLease(item)">详情</button>
+                <button class="small secondary" @click="openLease(item, 'edit')">修改</button>
+                <button class="small danger" @click="deleteLease(item)">删除</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="pagination">
+          <button class="secondary" :disabled="leasePage <= 1" @click="changeLeasePage(leasePage - 1)">上一页</button>
+          <span>第 {{ leasePage }} / {{ leaseTotalPages }} 页</span>
+          <button class="secondary" :disabled="leasePage >= leaseTotalPages" @click="changeLeasePage(leasePage + 1)">下一页</button>
+        </div>
+      </section>
+
       <section v-if="activePage === 'qa'" class="panel">
         <div class="qa">
           <input v-model="question" :disabled="isAsking" @keyup.enter="ask" />
@@ -907,6 +1144,43 @@ onMounted(async () => {
             {{ isScanning ? '扫描中...' : '开始扫描' }}
           </button>
           <button class="secondary" :disabled="isScanning" @click="closeScanDialog">取消</button>
+        </div>
+      </section>
+    </div>
+
+    <div v-if="selectedLease" class="dialog-backdrop" @click.self="closeLeaseDialog">
+      <section class="dialog">
+        <div class="panel-header">
+          <h2>{{ leaseDialogMode === 'edit' ? (selectedLease.id ? '修改租赁房源' : '添加租赁房源') : '租赁房源详情' }}</h2>
+          <button class="secondary" @click="closeLeaseDialog">关闭</button>
+        </div>
+        <div class="form-grid">
+          <label v-for="[key, label, type] in leaseFields" :key="key">
+            {{ label }}
+            <input v-if="leaseDialogMode === 'edit'" v-model="leaseForm[key]" :type="type" />
+            <span v-else class="readonly">{{ selectedLease[key] || '-' }}</span>
+          </label>
+          <label>
+            是否有钥匙
+            <select v-if="leaseDialogMode === 'edit'" v-model.number="leaseForm.has_key">
+              <option :value="0">否</option>
+              <option :value="1">是</option>
+            </select>
+            <span v-else class="readonly">{{ selectedLease.has_key ? '是' : '否' }}</span>
+          </label>
+          <label>
+            是否出售
+            <select v-if="leaseDialogMode === 'edit'" v-model.number="leaseForm.for_sale">
+              <option :value="0">否</option>
+              <option :value="1">是</option>
+            </select>
+            <span v-else class="readonly">{{ selectedLease.for_sale ? '是' : '否' }}</span>
+          </label>
+        </div>
+        <div class="actions">
+          <button v-if="leaseDialogMode === 'detail'" @click="leaseDialogMode = 'edit'">修改</button>
+          <button v-if="leaseDialogMode === 'edit'" @click="saveLease">保存</button>
+          <button v-if="selectedLease.id" class="danger" @click="deleteLease()">删除</button>
         </div>
       </section>
     </div>
