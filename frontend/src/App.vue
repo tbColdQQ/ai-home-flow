@@ -41,6 +41,12 @@ const tasks = ref([])
 const selectedTask = ref(null)
 const taskForm = ref({})
 const taskRemark = ref('')
+const dutyMonth = ref(new Date().toISOString().slice(0, 7))
+const dutyDays = ref([])
+const dutyRoster = ref([])
+const dutyRosterText = ref('')
+const selectedDutyDay = ref(null)
+const selectedDutyUserId = ref(null)
 const overview = ref({})
 const users = ref([])
 const roles = ref([])
@@ -75,7 +81,6 @@ const menus = computed(() => [
   { key: 'orders', label: '成交数据' },
   ...(canManageLeases.value ? [{ key: 'leases', label: '租赁房源' }] : []),
   { key: 'qa', label: '智能问答' },
-  ...(canHandleTasks.value ? [{ key: 'tasks', label: '每日待办' }] : []),
   ...(canManageUsers.value ? [{ key: 'admin', label: isAdmin.value ? '权限管理' : '用户管理' }] : []),
 ])
 
@@ -220,7 +225,14 @@ async function loadLeases() {
 }
 
 async function loadTasks() {
-  if (canHandleTasks.value) tasks.value = await api('/api/tasks')
+  tasks.value = await api('/api/tasks')
+}
+
+async function loadDuty() {
+  const data = await api(`/api/duty/schedule?month=${dutyMonth.value}`)
+  dutyDays.value = data.days || []
+  dutyRoster.value = data.roster || []
+  dutyRosterText.value = dutyRoster.value.map((item) => item.id).join(',')
 }
 
 async function loadAdminData() {
@@ -245,7 +257,7 @@ async function loadAdminData() {
 
 async function loadAll() {
   message.value = ''
-  await Promise.all([loadOrders(), loadLeases(), loadTasks(), loadAdminData()])
+  await Promise.all([loadOrders(), loadLeases(), loadTasks(), loadDuty(), loadAdminData()])
 }
 
 async function applyOrderFilters() {
@@ -288,6 +300,52 @@ async function resetLeaseFilters() {
   leaseFilters.value = { community_name: '', price_min: '', price_max: '', sort_by: 'lease_expire_date', sort_order: 'asc' }
   leasePage.value = 1
   await loadLeases()
+}
+
+function dutyWeekdayLabel(value) {
+  return ['一', '二', '三', '四', '五', '六', '日'][value] || ''
+}
+
+async function changeDutyMonth() {
+  await loadDuty()
+}
+
+async function saveDutyRoster() {
+  try {
+    const user_ids = rolePayloadText(dutyRosterText.value).map((item) => Number(item)).filter(Boolean)
+    const data = await api('/api/duty/roster', { method: 'PUT', body: JSON.stringify({ user_ids }) })
+    dutyRoster.value = data.roster || []
+    dutyRosterText.value = dutyRoster.value.map((item) => item.id).join(',')
+    message.value = '值班排序已保存'
+    await loadDuty()
+  } catch (error) {
+    message.value = error.message
+  }
+}
+
+function openDutyDay(day) {
+  if (!isStoreManager.value || !day.user_id) return
+  selectedDutyDay.value = day
+  selectedDutyUserId.value = day.user_id
+}
+
+function closeDutyDialog() {
+  selectedDutyDay.value = null
+  selectedDutyUserId.value = null
+}
+
+async function saveDutyAssignment() {
+  try {
+    await api('/api/duty/assignment', {
+      method: 'PUT',
+      body: JSON.stringify({ duty_date: selectedDutyDay.value.date, user_id: Number(selectedDutyUserId.value) }),
+    })
+    message.value = '当天值班人员已修改'
+    closeDutyDialog()
+    await loadDuty()
+  } catch (error) {
+    message.value = error.message
+  }
 }
 
 async function changeLeasePage(nextPage) {
@@ -793,11 +851,67 @@ onMounted(async () => {
 
       <p v-if="message" class="notice">{{ message }}</p>
 
-      <section v-if="activePage === 'dashboard'" class="cards">
-        <article class="metric"><span>成交记录</span><strong>{{ overview.orders ?? orderTotal }}</strong></article>
-        <article class="metric"><span>待办</span><strong>{{ overview.pending_tasks ?? tasks.length }}</strong></article>
-        <article class="metric"><span>用户</span><strong>{{ overview.users ?? '-' }}</strong></article>
-        <article class="metric"><span>角色</span><strong>{{ overview.roles ?? '-' }}</strong></article>
+      <section v-if="activePage === 'dashboard'" class="dashboard-stack">
+        <div class="cards">
+          <article class="metric"><span>成交记录</span><strong>{{ overview.orders ?? orderTotal }}</strong></article>
+          <article class="metric"><span>待办</span><strong>{{ overview.pending_tasks ?? tasks.length }}</strong></article>
+          <article class="metric"><span>用户</span><strong>{{ overview.users ?? '-' }}</strong></article>
+          <article class="metric"><span>角色</span><strong>{{ overview.roles ?? '-' }}</strong></article>
+        </div>
+
+        <section class="panel">
+          <div class="panel-header">
+            <h2>值班日历</h2>
+            <div class="actions">
+              <input v-model="dutyMonth" type="month" @change="changeDutyMonth" />
+              <button class="secondary" @click="loadDuty">刷新</button>
+            </div>
+          </div>
+          <div v-if="isStoreManager" class="duty-roster-editor">
+            <div>
+              <strong>值班排序</strong>
+              <span>按店员 ID 逗号分隔，系统按顺序每日轮换。</span>
+            </div>
+            <input v-model="dutyRosterText" placeholder="例如：3,5,8" />
+            <button @click="saveDutyRoster">保存排序</button>
+          </div>
+          <div class="duty-roster">
+            <span v-for="item in dutyRoster" :key="item.id">{{ item.sort_order }}. {{ item.display_name }}（ID {{ item.id }}）</span>
+            <span v-if="!dutyRoster.length">暂无可排班店员</span>
+          </div>
+          <div class="calendar-grid">
+            <div class="calendar-head" v-for="label in ['一','二','三','四','五','六','日']" :key="label">{{ label }}</div>
+            <button
+              v-for="day in dutyDays"
+              :key="day.date"
+              class="calendar-day"
+              :class="{ override: day.is_override }"
+              @click="openDutyDay(day)"
+            >
+              <strong>{{ day.day }}</strong>
+              <span>周{{ dutyWeekdayLabel(day.weekday) }}</span>
+              <em>{{ day.display_name || '未排班' }}</em>
+            </button>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header">
+            <h2>每日待办</h2>
+            <button class="secondary" @click="loadTasks">刷新</button>
+          </div>
+          <div v-if="!tasks.length" class="empty">暂无待办</div>
+          <div v-for="task in tasks" :key="task.id" class="task">
+            <div>
+              <strong>{{ task.title }}</strong>
+              <span>{{ task.city }} · {{ task.file_name || task.source_type }} · {{ task.reason }}</span>
+            </div>
+            <div v-if="canHandleTasks" class="row-actions">
+              <button class="small secondary" @click="openTask(task)">修改/确认</button>
+              <button class="small danger" @click="deleteTask(task)">删除</button>
+            </div>
+          </div>
+        </section>
       </section>
 
       <section v-if="activePage === 'orders'" class="panel">
@@ -1144,6 +1258,31 @@ onMounted(async () => {
             {{ isScanning ? '扫描中...' : '开始扫描' }}
           </button>
           <button class="secondary" :disabled="isScanning" @click="closeScanDialog">取消</button>
+        </div>
+      </section>
+    </div>
+
+    <div v-if="selectedDutyDay" class="dialog-backdrop" @click.self="closeDutyDialog">
+      <section class="dialog small-dialog">
+        <div class="panel-header">
+          <h2>修改值班人员</h2>
+          <button class="secondary" @click="closeDutyDialog">关闭</button>
+        </div>
+        <div class="form-grid single">
+          <label>
+            日期
+            <span class="readonly">{{ selectedDutyDay.date }}</span>
+          </label>
+          <label>
+            值班人员
+            <select v-model.number="selectedDutyUserId">
+              <option v-for="item in dutyRoster" :key="item.id" :value="item.id">{{ item.display_name }}</option>
+            </select>
+          </label>
+        </div>
+        <div class="actions">
+          <button @click="saveDutyAssignment">保存</button>
+          <button class="secondary" @click="closeDutyDialog">取消</button>
         </div>
       </section>
     </div>

@@ -195,6 +195,11 @@ p {
   gap: 14px;
 }
 
+.dashboard-stack {
+  display: grid;
+  gap: 16px;
+}
+
 .metric,
 .panel {
   background: #fff;
@@ -382,6 +387,88 @@ th {
   border-radius: 6px;
 }
 
+.duty-roster-editor {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr auto;
+  gap: 12px;
+  align-items: end;
+  margin-bottom: 12px;
+  padding: 12px;
+  background: #f8fafc;
+  border: 1px solid #edf2f7;
+  border-radius: 8px;
+}
+
+.duty-roster-editor div {
+  display: grid;
+  gap: 4px;
+}
+
+.duty-roster-editor span,
+.duty-roster span {
+  color: #64748b;
+  font-size: 13px;
+}
+
+.duty-roster {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.duty-roster span {
+  padding: 6px 8px;
+  background: #f8fafc;
+  border: 1px solid #edf2f7;
+  border-radius: 6px;
+}
+
+.calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.calendar-head {
+  padding: 8px;
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: center;
+}
+
+.calendar-day {
+  min-height: 92px;
+  display: grid;
+  gap: 4px;
+  align-content: start;
+  padding: 10px;
+  color: #172033;
+  background: #fff;
+  border-color: #e2e8f0;
+  text-align: left;
+}
+
+.calendar-day strong {
+  font-size: 18px;
+}
+
+.calendar-day span {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.calendar-day em {
+  font-style: normal;
+  font-weight: 600;
+}
+
+.calendar-day.override {
+  border-color: #2563eb;
+  background: #eff6ff;
+}
+
 .admin-grid {
   display: grid;
   gap: 16px;
@@ -476,7 +563,9 @@ th {
   .actions,
   .qa,
   .form-grid,
-  .filters {
+  .filters,
+  .duty-roster-editor,
+  .calendar-grid {
     display: grid;
     grid-template-columns: 1fr;
   }

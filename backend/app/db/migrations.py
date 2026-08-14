@@ -93,6 +93,34 @@ def migrate() -> None:
                 modifier TEXT,
                 modify_time TEXT
             );
+
+            CREATE TABLE IF NOT EXISTS duty_roster (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                city TEXT NOT NULL,
+                store_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                sort_order INTEGER NOT NULL,
+                create_time TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                modify_time TEXT,
+                UNIQUE(city, store_id, user_id),
+                FOREIGN KEY(store_id) REFERENCES stores(id),
+                FOREIGN KEY(user_id) REFERENCES users(id)
+            );
+
+            CREATE TABLE IF NOT EXISTS duty_overrides (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                city TEXT NOT NULL,
+                store_id INTEGER NOT NULL,
+                duty_date TEXT NOT NULL,
+                user_id INTEGER NOT NULL,
+                modifier_user_id INTEGER,
+                create_time TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                modify_time TEXT,
+                UNIQUE(city, store_id, duty_date),
+                FOREIGN KEY(store_id) REFERENCES stores(id),
+                FOREIGN KEY(user_id) REFERENCES users(id),
+                FOREIGN KEY(modifier_user_id) REFERENCES users(id)
+            );
             """
         )
 
@@ -296,6 +324,8 @@ def migrate() -> None:
             CREATE INDEX IF NOT EXISTS idx_lease_city_price ON lease_properties(city, price);
             CREATE INDEX IF NOT EXISTS idx_lease_city_expire ON lease_properties(city, lease_expire_date);
             CREATE INDEX IF NOT EXISTS idx_lease_status ON lease_properties(status);
+            CREATE INDEX IF NOT EXISTS idx_duty_roster_store ON duty_roster(city, store_id, sort_order);
+            CREATE INDEX IF NOT EXISTS idx_duty_overrides_store_date ON duty_overrides(city, store_id, duty_date);
             CREATE INDEX IF NOT EXISTS idx_source_images_city_date ON source_images(city, business_date);
             CREATE INDEX IF NOT EXISTS idx_task_items_status ON task_items(status);
             CREATE INDEX IF NOT EXISTS idx_task_items_city_status ON task_items(city, status);
