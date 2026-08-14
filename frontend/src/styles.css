@@ -324,15 +324,56 @@ th {
 }
 
 .task {
-  display: grid;
-  gap: 5px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   padding: 12px 0;
   border-bottom: 1px solid #edf2f7;
+}
+
+.task > div:first-child {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
 }
 
 .task span {
   color: #64748b;
   font-size: 13px;
+}
+
+.empty {
+  padding: 18px 0;
+  color: #64748b;
+}
+
+.task-source {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 14px;
+  padding: 12px;
+  background: #f8fafc;
+  border: 1px solid #edf2f7;
+  border-radius: 8px;
+}
+
+.task-source span,
+.task-source p {
+  color: #64748b;
+  font-size: 13px;
+}
+
+.task-source pre {
+  max-height: 180px;
+  overflow: auto;
+  margin: 0;
+  padding: 10px;
+  color: #172033;
+  white-space: pre-wrap;
+  background: #fff;
+  border: 1px solid #edf2f7;
+  border-radius: 6px;
 }
 
 .admin-grid {
@@ -428,7 +469,8 @@ th {
 
   .filter-actions,
   .table-meta,
-  .pagination {
+  .pagination,
+  .task {
     display: grid;
     grid-template-columns: 1fr;
   }

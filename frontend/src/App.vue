@@ -29,6 +29,9 @@ const selectedOrder = ref(null)
 const orderDialogMode = ref('detail')
 const orderForm = ref({})
 const tasks = ref([])
+const selectedTask = ref(null)
+const taskForm = ref({})
+const taskRemark = ref('')
 const overview = ref({})
 const users = ref([])
 const roles = ref([])
@@ -233,6 +236,81 @@ async function openOrder(item, mode = 'detail') {
 function closeOrderDialog() {
   selectedOrder.value = null
   orderForm.value = {}
+}
+
+function taskPayload(item) {
+  if (item.payload_json) {
+    try {
+      return JSON.parse(item.payload_json)
+    } catch {
+      // 使用默认表单兜底。
+    }
+  }
+  return {
+    city: item.city || user.value?.city,
+    signing_date: item.business_date || '',
+    residential: '',
+    price: null,
+    acreage: null,
+    agent: '',
+    store: item.store || '',
+    CA: '',
+    status: 'normal',
+    source_type: item.source_type,
+    source_id: item.source_id,
+  }
+}
+
+function openTask(item) {
+  selectedTask.value = item
+  taskForm.value = taskPayload(item)
+  taskRemark.value = item.reason || ''
+}
+
+function closeTaskDialog() {
+  selectedTask.value = null
+  taskForm.value = {}
+  taskRemark.value = ''
+}
+
+async function saveTaskDraft() {
+  try {
+    await api(`/api/tasks/${selectedTask.value.id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ order: taskForm.value, remark: taskRemark.value }),
+    })
+    message.value = '待办已保存'
+    await loadTasks()
+  } catch (error) {
+    message.value = error.message
+  }
+}
+
+async function completeTask() {
+  try {
+    const data = await api(`/api/tasks/${selectedTask.value.id}/complete`, {
+      method: 'POST',
+      body: JSON.stringify({ order: taskForm.value, remark: taskRemark.value }),
+    })
+    message.value = `待办已确认入库，订单 ID：${data.order_id}`
+    closeTaskDialog()
+    await loadAll()
+  } catch (error) {
+    message.value = error.message
+  }
+}
+
+async function deleteTask(item = selectedTask.value) {
+  if (!item) return
+  if (!window.confirm(`确认删除待办 ${item.title || item.id}？`)) return
+  try {
+    await api(`/api/tasks/${item.id}`, { method: 'DELETE' })
+    message.value = '待办已删除'
+    closeTaskDialog()
+    await loadTasks()
+  } catch (error) {
+    message.value = error.message
+  }
 }
 
 async function saveOrder() {
@@ -624,10 +702,20 @@ onMounted(async () => {
       </section>
 
       <section v-if="activePage === 'tasks'" class="panel">
-        <h2>每日待办</h2>
+        <div class="panel-header">
+          <h2>每日待办</h2>
+          <button class="secondary" @click="loadTasks">刷新</button>
+        </div>
+        <div v-if="!tasks.length" class="empty">暂无待办</div>
         <div v-for="task in tasks" :key="task.id" class="task">
-          <strong>{{ task.title }}</strong>
-          <span>{{ task.city }} · {{ task.reason }}</span>
+          <div>
+            <strong>{{ task.title }}</strong>
+            <span>{{ task.city }} · {{ task.file_name || task.source_type }} · {{ task.reason }}</span>
+          </div>
+          <div class="row-actions">
+            <button class="small secondary" @click="openTask(task)">修改/确认</button>
+            <button class="small danger" @click="deleteTask(task)">删除</button>
+          </div>
         </div>
       </section>
 
@@ -795,6 +883,43 @@ onMounted(async () => {
           <button v-if="orderDialogMode === 'detail' && canEditOrders" @click="orderDialogMode = 'edit'">修改</button>
           <button v-if="orderDialogMode === 'edit'" @click="saveOrder">保存</button>
           <button v-if="canEditOrders" class="danger" @click="deleteOrder(selectedOrder)">删除</button>
+        </div>
+      </section>
+    </div>
+
+    <div v-if="selectedTask" class="dialog-backdrop" @click.self="closeTaskDialog">
+      <section class="dialog">
+        <div class="panel-header">
+          <h2>处理待办</h2>
+          <button class="secondary" @click="closeTaskDialog">关闭</button>
+        </div>
+        <div class="task-source">
+          <strong>{{ selectedTask.file_name || selectedTask.title }}</strong>
+          <span>{{ selectedTask.city }} · {{ selectedTask.business_date || '-' }}</span>
+          <p>{{ selectedTask.reason }}</p>
+          <pre v-if="selectedTask.ocr_text">{{ selectedTask.ocr_text }}</pre>
+        </div>
+        <div class="form-grid">
+          <label v-for="[key, label, type] in orderFields" :key="key">
+            {{ label }}
+            <input v-model="taskForm[key]" :type="type" />
+          </label>
+          <label>
+            车位
+            <select v-model.number="taskForm.parking">
+              <option :value="0">无</option>
+              <option :value="1">有</option>
+            </select>
+          </label>
+          <label>
+            处理备注
+            <input v-model="taskRemark" />
+          </label>
+        </div>
+        <div class="actions">
+          <button class="secondary" @click="saveTaskDraft">保存修改</button>
+          <button @click="completeTask">确认入库</button>
+          <button class="danger" @click="deleteTask()">删除待办</button>
         </div>
       </section>
     </div>

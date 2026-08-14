@@ -173,6 +173,62 @@ def _has_duplicate_order(conn, data: dict) -> bool:
     return row is not None
 
 
+def _upsert_pending_task(conn, source_id: int | None, city: str, store: str | None, payload_json: str | None, reason: str) -> None:
+    task = conn.execute(
+        """
+        SELECT id
+        FROM task_items
+        WHERE source_type = 'image'
+          AND source_id IS ?
+          AND status = 'pending'
+        ORDER BY id DESC
+        LIMIT 1
+        """,
+        (source_id,),
+    ).fetchone()
+    if task:
+        conn.execute(
+            """
+            UPDATE task_items
+            SET title = '成交图片识别待确认',
+                city = ?,
+                store = ?,
+                payload_json = ?,
+                reason = ?
+            WHERE id = ?
+            """,
+            (city, store, payload_json, reason, task["id"]),
+        )
+        return
+
+    conn.execute(
+        """
+        INSERT INTO task_items(
+            task_type, title, city, store, source_type, source_id,
+            assignee_role, payload_json, reason
+        )
+        VALUES ('ocr_order_confirm', '成交图片识别待确认', ?, ?, 'image', ?, 'store_manager', ?, ?)
+        """,
+        (city, store, source_id, payload_json, reason),
+    )
+
+
+def _mark_source_tasks_done(conn, source_id: int, order_id: int) -> None:
+    conn.execute(
+        """
+        UPDATE task_items
+        SET status = 'done',
+            result_ref_type = 'order',
+            result_ref_id = ?,
+            finish_time = CURRENT_TIMESTAMP
+        WHERE source_type = 'image'
+          AND source_id = ?
+          AND status = 'pending'
+        """,
+        (order_id, source_id),
+    )
+
+
 def scan_images(root: Path | None = None) -> dict:
     root = root or settings.image_root
     root.mkdir(parents=True, exist_ok=True)
@@ -193,22 +249,50 @@ def scan_images(root: Path | None = None) -> dict:
         city, business_date = parts[0], parts[1]
         digest = file_hash(image_path)
         with get_connection() as conn:
-            exists = conn.execute("SELECT id FROM source_images WHERE file_hash = ?", (digest,)).fetchone()
-        if exists:
+            exists = conn.execute(
+                "SELECT id, status, related_order_id FROM source_images WHERE file_hash = ?",
+                (digest,),
+            ).fetchone()
+        existing_source_id = int(exists["id"]) if exists else None
+        if exists and (exists["status"] in {"confirmed", "ignored"} or exists["related_order_id"]):
             result["skipped"] += 1
             continue
 
         ocr_text, error = extract_text(image_path)
         if error:
-            source_id = _insert_source_image(city, business_date, image_path, digest, ocr_text, "pending", error_message=error)
             with get_connection() as conn:
-                conn.execute(
-                    """
-                    INSERT INTO task_items(task_type, title, city, source_type, source_id, assignee_role, reason)
-                    VALUES ('ocr_order_confirm', '成交图片识别待确认', ?, 'image', ?, 'store_manager', ?)
-                    """,
-                    (city, source_id, error),
-                )
+                if existing_source_id:
+                    source_id = existing_source_id
+                    conn.execute(
+                        """
+                        UPDATE source_images
+                        SET city = ?,
+                            business_date = ?,
+                            file_path = ?,
+                            file_name = ?,
+                            ocr_text = ?,
+                            parsed_result_json = NULL,
+                            confidence_json = NULL,
+                            status = 'pending',
+                            error_message = ?,
+                            modify_time = CURRENT_TIMESTAMP
+                        WHERE id = ?
+                        """,
+                        (city, business_date, str(image_path), image_path.name, ocr_text, error, source_id),
+                    )
+                else:
+                    cursor = conn.execute(
+                        """
+                        INSERT INTO source_images(
+                            city, business_date, file_path, file_name, file_hash,
+                            ocr_text, parsed_result_json, confidence_json, status, error_message
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, 'pending', ?)
+                        """,
+                        (city, business_date, str(image_path), image_path.name, digest, ocr_text, error),
+                    )
+                    source_id = int(cursor.lastrowid)
+                _upsert_pending_task(conn, source_id, city, None, None, error)
                 conn.commit()
             result["pending"] += 1
             continue
@@ -223,37 +307,59 @@ def scan_images(root: Path | None = None) -> dict:
                 parsed.reasons.append("疑似重复成交记录")
 
             if parsed.needs_review:
-                cursor = conn.execute(
-                    """
-                    INSERT INTO source_images(
-                        city, business_date, file_path, file_name, file_hash,
-                        ocr_text, parsed_result_json, confidence_json, status, error_message
+                reason = ";".join(parsed.reasons)
+                if existing_source_id:
+                    source_id = existing_source_id
+                    conn.execute(
+                        """
+                        UPDATE source_images
+                        SET city = ?,
+                            business_date = ?,
+                            file_path = ?,
+                            file_name = ?,
+                            ocr_text = ?,
+                            parsed_result_json = ?,
+                            confidence_json = ?,
+                            status = 'pending',
+                            error_message = ?,
+                            modify_time = CURRENT_TIMESTAMP
+                        WHERE id = ?
+                        """,
+                        (
+                            city,
+                            business_date,
+                            str(image_path),
+                            image_path.name,
+                            ocr_text,
+                            parsed_json,
+                            confidence_json,
+                            reason,
+                            source_id,
+                        ),
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
-                    """,
-                    (
-                        city,
-                        business_date,
-                        str(image_path),
-                        image_path.name,
-                        digest,
-                        ocr_text,
-                        parsed_json,
-                        confidence_json,
-                        ";".join(parsed.reasons),
-                    ),
-                )
-                source_id = int(cursor.lastrowid)
-                conn.execute(
-                    """
-                    INSERT INTO task_items(
-                        task_type, title, city, store, source_type, source_id,
-                        assignee_role, payload_json, reason
+                else:
+                    cursor = conn.execute(
+                        """
+                        INSERT INTO source_images(
+                            city, business_date, file_path, file_name, file_hash,
+                            ocr_text, parsed_result_json, confidence_json, status, error_message
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+                        """,
+                        (
+                            city,
+                            business_date,
+                            str(image_path),
+                            image_path.name,
+                            digest,
+                            ocr_text,
+                            parsed_json,
+                            confidence_json,
+                            reason,
+                        ),
                     )
-                    VALUES ('ocr_order_confirm', '成交图片识别待确认', ?, ?, 'image', ?, 'store_manager', ?, ?)
-                    """,
-                    (city, parsed.data.get("store"), source_id, parsed_json, ";".join(parsed.reasons)),
-                )
+                    source_id = int(cursor.lastrowid)
+                _upsert_pending_task(conn, source_id, city, parsed.data.get("store"), parsed_json, reason)
                 conn.commit()
                 result["pending"] += 1
             else:
@@ -265,27 +371,59 @@ def scan_images(root: Path | None = None) -> dict:
                     }
                 )
                 order_id = create_order(conn, parsed.data)
-                cursor = conn.execute(
-                    """
-                    INSERT INTO source_images(
-                        city, business_date, file_path, file_name, file_hash,
-                        ocr_text, parsed_result_json, confidence_json, status, related_order_id
+                if existing_source_id:
+                    source_id = existing_source_id
+                    conn.execute(
+                        """
+                        UPDATE source_images
+                        SET city = ?,
+                            business_date = ?,
+                            file_path = ?,
+                            file_name = ?,
+                            ocr_text = ?,
+                            parsed_result_json = ?,
+                            confidence_json = ?,
+                            status = 'confirmed',
+                            error_message = NULL,
+                            related_order_id = ?,
+                            modify_time = CURRENT_TIMESTAMP
+                        WHERE id = ?
+                        """,
+                        (
+                            city,
+                            business_date,
+                            str(image_path),
+                            image_path.name,
+                            ocr_text,
+                            parsed_json,
+                            confidence_json,
+                            order_id,
+                            source_id,
+                        ),
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'confirmed', ?)
-                    """,
-                    (
-                        city,
-                        business_date,
-                        str(image_path),
-                        image_path.name,
-                        digest,
-                        ocr_text,
-                        parsed_json,
-                        confidence_json,
-                        order_id,
-                    ),
-                )
-                source_id = int(cursor.lastrowid)
+                    _mark_source_tasks_done(conn, source_id, order_id)
+                else:
+                    cursor = conn.execute(
+                        """
+                        INSERT INTO source_images(
+                            city, business_date, file_path, file_name, file_hash,
+                            ocr_text, parsed_result_json, confidence_json, status, related_order_id
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'confirmed', ?)
+                        """,
+                        (
+                            city,
+                            business_date,
+                            str(image_path),
+                            image_path.name,
+                            digest,
+                            ocr_text,
+                            parsed_json,
+                            confidence_json,
+                            order_id,
+                        ),
+                    )
+                    source_id = int(cursor.lastrowid)
                 conn.execute("UPDATE orders SET source_id = ? WHERE ID = ?", (source_id, order_id))
                 conn.commit()
                 result["confirmed"] += 1

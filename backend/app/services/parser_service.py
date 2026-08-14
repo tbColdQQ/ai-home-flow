@@ -14,10 +14,12 @@ class ParsedOrder:
 
 
 LABEL_ALIASES = {
-    "residential": ["维护楼盘", "楼盘", "小区"],
-    "price": ["成交价格", "成交价"],
-    "acreage": ["房源面积", "面积"],
-    "CA": ["维护人CA", "维护人 CA", "CA"],
+    "residential": ["维护楼盘", "签约小区", "楼盘", "小区"],
+    "price": ["成交价格", "签约金额", "成交价"],
+    "acreage": ["房源面积", "签约面积", "面积"],
+    "CA": ["维护人CA", "维护人 CA", "签约CA", "签约 CA", "CA"],
+    "brand": ["签约品牌", "品牌"],
+    "signing_date": ["签约时间", "成交时间", "成交日期", "签约日期"],
 }
 
 IGNORE_LINES = {
@@ -26,6 +28,11 @@ IGNORE_LINES = {
     "房源售出",
     "贺报",
     "賀報",
+    "喜报",
+    "让家更美好",
+    "更美好",
+    "二手成交速递",
+    "nohep",
 }
 
 
@@ -57,15 +64,31 @@ def _line_after_labels(lines: list[str], labels: list[str]) -> str | None:
     return None
 
 
-def _number_from_value(value: str | None) -> float | None:
+def _number_from_value(value: str | None, unit_multiplier: bool = False) -> float | None:
     if not value:
         return None
     match = re.search(r"\d+(?:\.\d+)?", value.replace(",", ""))
-    return float(match.group(0)) if match else None
+    if not match:
+        return None
+    number = float(match.group(0))
+    if unit_multiplier and "万" in value:
+        return number * 10000
+    return number
 
 
-def _number_after_labels(lines: list[str], labels: list[str]) -> float | None:
-    return _number_from_value(_line_after_labels(lines, labels))
+def _number_after_labels(lines: list[str], labels: list[str], unit_multiplier: bool = False) -> float | None:
+    return _number_from_value(_line_after_labels(lines, labels), unit_multiplier)
+
+
+def _date_after_labels(lines: list[str], labels: list[str]) -> str | None:
+    value = _line_after_labels(lines, labels)
+    if not value:
+        return None
+    match = re.search(r"\d{4}[-/]\d{1,2}[-/]\d{1,2}", value)
+    if not match:
+        return None
+    year, month, day = re.split(r"[-/]", match.group(0))
+    return f"{int(year):04d}-{int(month):02d}-{int(day):02d}"
 
 
 def parse_order_text(text: str, city: str, business_date: str) -> ParsedOrder:
@@ -74,9 +97,11 @@ def parse_order_text(text: str, city: str, business_date: str) -> ParsedOrder:
     label_fragments = [label for aliases in LABEL_ALIASES.values() for label in aliases]
 
     residential = _line_after_labels(lines, LABEL_ALIASES["residential"])
-    price = _number_after_labels(lines, LABEL_ALIASES["price"])
+    price = _number_after_labels(lines, LABEL_ALIASES["price"], unit_multiplier=True)
     acreage = _number_after_labels(lines, LABEL_ALIASES["acreage"])
     ca = _line_after_labels(lines, LABEL_ALIASES["CA"])
+    brand = _line_after_labels(lines, LABEL_ALIASES["brand"])
+    parsed_signing_date = _date_after_labels(lines, LABEL_ALIASES["signing_date"])
 
     agent = None
     store = None
@@ -92,6 +117,8 @@ def parse_order_text(text: str, city: str, business_date: str) -> ParsedOrder:
             continue
         if ca and value == ca:
             continue
+        if brand and value == brand:
+            continue
         if agent is None and 2 <= len(value) <= 5 and not re.search(r"\d", value):
             agent = value
             continue
@@ -105,10 +132,10 @@ def parse_order_text(text: str, city: str, business_date: str) -> ParsedOrder:
         "acreage": acreage,
         "agent": agent,
         "store": store,
-        "signing_date": business_date,
+        "signing_date": parsed_signing_date or business_date,
         "CA": ca,
         "status": "normal",
-        "brand": "贝壳/德佑" if ("贝壳" in clean_text or "德佑" in clean_text) else None,
+        "brand": brand or ("贝壳/德佑" if ("贝壳" in clean_text or "德佑" in clean_text) else None),
     }
 
     confidence = {
