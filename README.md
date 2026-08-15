@@ -15,6 +15,34 @@
 
 ## 后端启动
 
+推荐使用本地脚本一次启动后端、PC 前端和 H5 前端：
+
+```bash
+start-local.bat
+```
+
+访问地址：
+
+```text
+后端：http://localhost:8000
+PC：http://localhost:5173
+H5：http://localhost:5172
+```
+
+停止本地服务：
+
+```bash
+stop-local.bat
+```
+
+首次启动如果需要安装依赖和初始化数据库：
+
+```bash
+start-local.bat -Install -InitDb
+```
+
+也可以继续使用手动启动方式：
+
 ```bash
 cd backend
 python -m venv .venv
