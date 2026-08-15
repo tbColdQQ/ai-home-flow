@@ -371,6 +371,7 @@ def migrate() -> None:
                 ("clerk", "店员", "查询所属城市成交数据，使用智能问答"),
                 ("store_manager", "店长", "处理待办、导入数据、管理店员权限"),
                 ("admin", "管理员", "系统管理和全部数据权限"),
+                ("rental_clerk", "租赁店员", "处理租赁房源到期提醒待办"),
             ],
         )
         conn.executemany(

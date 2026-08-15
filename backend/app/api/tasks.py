@@ -7,7 +7,6 @@ from app.api.deps import current_user
 from app.db.session import get_connection, rows_to_dicts
 from app.services.auth_service import CurrentUser
 from app.services.lease_task_service import (
-    acknowledge_lease_task,
     add_lease_followup,
     generate_lease_expiry_tasks,
     suppress_lease_task,
@@ -33,22 +32,9 @@ class LeaseFollowupRequest(BaseModel):
     content: str
 
 
-def ensure_task_handler(user: CurrentUser) -> None:
+def ensure_image_task_handler(user: CurrentUser) -> None:
     if not {"store_manager", "admin"}.intersection(user.role_codes):
-        raise HTTPException(status_code=403, detail="无权处理待办")
-
-
-def ensure_task_access(task: dict, user: CurrentUser) -> None:
-    if "admin" in user.role_codes:
-        return
-    if task.get("task_type") == "lease_expiry":
-        if "store_manager" in user.role_codes and task.get("assignee_store_id") == user.store_id:
-            return
-        if task.get("assignee_user_id") == user.id:
-            return
-        raise HTTPException(status_code=403, detail="无权处理其他人的租赁待办")
-    if task.get("city") != user.city:
-        raise HTTPException(status_code=403, detail="无权处理其他城市的待办")
+        raise HTTPException(status_code=403, detail="无权处理成交图片待办")
 
 
 def _task_select_sql() -> str:
@@ -57,12 +43,23 @@ def _task_select_sql() -> str:
                lp.community_name, lp.address, lp.lease_expire_date,
                au.store_id AS assignee_store_id,
                au.display_name AS assignee_name,
+               hu.id AS handler_user_id,
+               hu.display_name AS handler_name,
                COUNT(lf.id) AS followup_count
         FROM task_items t
         LEFT JOIN source_images si ON si.id = t.source_id AND t.source_type = 'image'
         LEFT JOIN lease_properties lp ON lp.id = t.source_id AND t.source_type = 'lease'
         LEFT JOIN users au ON au.id = t.assignee_user_id
         LEFT JOIN lease_task_followups lf ON lf.task_id = t.id
+        LEFT JOIN task_logs hlog ON hlog.id = (
+            SELECT tl.id
+            FROM task_logs tl
+            WHERE tl.task_id = t.id
+              AND tl.action IN ('complete', 'acknowledge')
+            ORDER BY tl.create_time DESC, tl.id DESC
+            LIMIT 1
+        )
+        LEFT JOIN users hu ON hu.id = hlog.operator_user_id
     """
 
 
@@ -78,6 +75,18 @@ def _load_task(conn, task_id: int) -> dict:
     if task is None:
         raise HTTPException(status_code=404, detail="待办不存在")
     return dict(task)
+
+
+def ensure_task_access(task: dict, user: CurrentUser) -> None:
+    if "admin" in user.role_codes:
+        return
+    if "store_manager" in user.role_codes and task.get("assignee_store_id") == user.store_id:
+        return
+    if task.get("assignee_user_id") == user.id:
+        return
+    if task.get("task_type") != "lease_expiry" and task.get("city") == user.city and "store_manager" in user.role_codes:
+        return
+    raise HTTPException(status_code=403, detail="无权查看或处理该待办")
 
 
 @router.get("")
@@ -101,7 +110,7 @@ def list_tasks(status: str = "pending", user: CurrentUser = Depends(current_user
                 + """
                 WHERE t.status = ?
                   AND (
-                    (t.task_type = 'lease_expiry' AND au.store_id = ?)
+                    au.store_id = ?
                     OR (t.task_type != 'lease_expiry' AND t.city = ?)
                   )
                 GROUP BY t.id
@@ -109,36 +118,23 @@ def list_tasks(status: str = "pending", user: CurrentUser = Depends(current_user
                 """,
                 (status, user.store_id, user.city),
             ).fetchall()
-        elif "rental_agent" in user.role_codes:
-            rows = conn.execute(
-                base_sql
-                + """
-                WHERE t.status = ?
-                  AND (
-                    (t.task_type = 'lease_expiry' AND t.assignee_user_id = ?)
-                    OR (t.task_type != 'lease_expiry' AND t.city = ?)
-                  )
-                GROUP BY t.id
-                ORDER BY t.create_time DESC
-                """,
-                (status, user.id, user.city),
-            ).fetchall()
         else:
             rows = conn.execute(
                 base_sql
                 + """
-                WHERE t.status = ? AND t.city = ?
+                WHERE t.status = ?
+                  AND t.assignee_user_id = ?
                 GROUP BY t.id
                 ORDER BY t.create_time DESC
                 """,
-                (status, user.city),
+                (status, user.id),
             ).fetchall()
         return rows_to_dicts(rows)
 
 
 @router.put("/{task_id}")
 def update_task(task_id: int, body: UpdateTaskRequest, user: CurrentUser = Depends(current_user)) -> dict[str, str]:
-    ensure_task_handler(user)
+    ensure_image_task_handler(user)
     with get_connection() as conn:
         task = _load_task(conn, task_id)
         ensure_task_access(task, user)
@@ -184,7 +180,7 @@ def update_task(task_id: int, body: UpdateTaskRequest, user: CurrentUser = Depen
 
 @router.post("/{task_id}/complete")
 def complete_task(task_id: int, body: CompleteTaskRequest, user: CurrentUser = Depends(current_user)) -> dict:
-    ensure_task_handler(user)
+    ensure_image_task_handler(user)
     with get_connection() as conn:
         task = _load_task(conn, task_id)
         ensure_task_access(task, user)
@@ -234,40 +230,33 @@ def complete_task(task_id: int, body: CompleteTaskRequest, user: CurrentUser = D
         return {"order_id": order_id}
 
 
-@router.post("/{task_id}/ignore")
-def ignore_task(task_id: int, user: CurrentUser = Depends(current_user)) -> dict[str, str]:
-    ensure_task_handler(user)
+@router.post("/{task_id}/acknowledge")
+def acknowledge_task(task_id: int, user: CurrentUser = Depends(current_user)) -> dict[str, str]:
     with get_connection() as conn:
         task = _load_task(conn, task_id)
         ensure_task_access(task, user)
         if task["status"] != "pending":
             raise HTTPException(status_code=400, detail="待办已处理")
-        conn.execute("UPDATE task_items SET status = 'ignored', finish_time = CURRENT_TIMESTAMP WHERE id = ?", (task_id,))
-        if task["source_type"] == "image":
-            conn.execute(
-                "UPDATE source_images SET status = 'ignored', modify_time = CURRENT_TIMESTAMP WHERE id = ?",
-                (task["source_id"],),
-            )
         conn.execute(
-            "INSERT INTO task_logs(task_id, action, operator_user_id) VALUES (?, 'ignore', ?)",
+            "UPDATE task_items SET status = 'done', finish_time = CURRENT_TIMESTAMP WHERE id = ?",
+            (task_id,),
+        )
+        conn.execute(
+            "INSERT INTO task_logs(task_id, action, operator_user_id) VALUES (?, 'acknowledge', ?)",
             (task_id, user.id),
         )
         conn.commit()
-    return {"message": "ignored"}
-
-
-def _ensure_lease_task(task: dict) -> None:
-    if task.get("task_type") != "lease_expiry" or task.get("source_type") != "lease":
-        raise HTTPException(status_code=400, detail="不是租赁到期待办")
-    if task.get("status") != "pending":
-        raise HTTPException(status_code=400, detail="待办已处理")
+    return {"message": "done"}
 
 
 @router.post("/{task_id}/lease-followups")
 def add_followup(task_id: int, body: LeaseFollowupRequest, user: CurrentUser = Depends(current_user)) -> dict[str, str]:
     with get_connection() as conn:
         task = _load_task(conn, task_id)
-        _ensure_lease_task(task)
+        if task.get("task_type") != "lease_expiry" or task.get("source_type") != "lease":
+            raise HTTPException(status_code=400, detail="不是租赁到期待办")
+        if task.get("status") != "pending":
+            raise HTTPException(status_code=400, detail="待办已处理")
         ensure_task_access(task, user)
         try:
             add_lease_followup(conn, task, user, body.content)
@@ -277,22 +266,14 @@ def add_followup(task_id: int, body: LeaseFollowupRequest, user: CurrentUser = D
     return {"message": "created"}
 
 
-@router.post("/{task_id}/acknowledge")
-def acknowledge_task(task_id: int, user: CurrentUser = Depends(current_user)) -> dict[str, str]:
-    with get_connection() as conn:
-        task = _load_task(conn, task_id)
-        _ensure_lease_task(task)
-        ensure_task_access(task, user)
-        acknowledge_lease_task(conn, task, user)
-        conn.commit()
-    return {"message": "done"}
-
-
 @router.post("/{task_id}/suppress")
 def suppress_task(task_id: int, user: CurrentUser = Depends(current_user)) -> dict[str, str]:
     with get_connection() as conn:
         task = _load_task(conn, task_id)
-        _ensure_lease_task(task)
+        if task.get("task_type") != "lease_expiry" or task.get("source_type") != "lease":
+            raise HTTPException(status_code=400, detail="不是租赁到期待办")
+        if task.get("status") != "pending":
+            raise HTTPException(status_code=400, detail="待办已处理")
         ensure_task_access(task, user)
         if not task_has_followup(conn, task_id):
             raise HTTPException(status_code=400, detail="已有回访记录后才能不再提示")
@@ -303,4 +284,16 @@ def suppress_task(task_id: int, user: CurrentUser = Depends(current_user)) -> di
 
 @router.delete("/{task_id}")
 def delete_task(task_id: int, user: CurrentUser = Depends(current_user)) -> dict[str, str]:
-    return ignore_task(task_id, user)
+    with get_connection() as conn:
+        task = _load_task(conn, task_id)
+        if task.get("status") != "done":
+            raise HTTPException(status_code=400, detail="只能删除已办")
+        if task.get("handler_user_id") != user.id:
+            raise HTTPException(status_code=403, detail="只有处理人可以删除已办")
+        conn.execute("UPDATE task_items SET status = 'deleted' WHERE id = ?", (task_id,))
+        conn.execute(
+            "INSERT INTO task_logs(task_id, action, operator_user_id) VALUES (?, 'delete_done', ?)",
+            (task_id, user.id),
+        )
+        conn.commit()
+    return {"message": "deleted"}

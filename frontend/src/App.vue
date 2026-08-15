@@ -72,7 +72,7 @@ const isScanning = ref(false)
 const isLoggedIn = computed(() => Boolean(token.value && user.value))
 const isAdmin = computed(() => user.value?.roles?.includes('admin'))
 const isStoreManager = computed(() => user.value?.roles?.includes('store_manager'))
-const canHandleTasks = computed(() => user.value?.roles?.some((role) => ['admin', 'store_manager', 'rental_agent'].includes(role)))
+const canHandleTasks = computed(() => user.value?.roles?.some((role) => ['admin', 'store_manager', 'rental_agent', 'rental_clerk'].includes(role)))
 const canScanImages = computed(() => user.value?.roles?.some((role) => ['admin', 'store_manager'].includes(role)))
 const canManageUsers = computed(() => isAdmin.value || isStoreManager.value)
 const canEditOrders = computed(() => isAdmin.value || isStoreManager.value)
@@ -639,6 +639,19 @@ function leaseTaskSummary(task) {
   ].filter(Boolean).join(' · ')
 }
 
+function taskTypeLabel(task) {
+  return isLeaseTask(task) ? '租赁到期' : '成交确认'
+}
+
+function taskSourceText(task) {
+  if (isLeaseTask(task)) return leaseTaskSummary(task)
+  return [task.city, task.file_name || task.source_type, task.reason].filter(Boolean).join(' · ')
+}
+
+function canDeleteDoneTask(task) {
+  return task?.status === 'done' && task?.handler_user_id === user.value?.id
+}
+
 async function addLeaseFollowup(task) {
   const content = window.prompt('请输入回访内容')
   if (!content) return
@@ -655,6 +668,16 @@ async function addLeaseFollowup(task) {
 }
 
 async function acknowledgeLeaseTask(task) {
+  try {
+    await api(`/api/tasks/${task.id}/acknowledge`, { method: 'POST' })
+    message.value = '待办已知悉'
+    await loadTasks()
+  } catch (error) {
+    message.value = error.message
+  }
+}
+
+async function acknowledgeTask(task) {
   try {
     await api(`/api/tasks/${task.id}/acknowledge`, { method: 'POST' })
     message.value = '待办已知悉'
@@ -1024,23 +1047,32 @@ watch(dutyCalendarDate, (value) => {
               <button class="secondary" @click="loadTasks">刷新</button>
             </div>
           </div>
-          <div v-if="!tasks.length" class="empty">暂无待办</div>
-          <div v-for="task in tasks" :key="task.id" class="task">
-            <div>
-              <strong>{{ task.title }}</strong>
-              <span v-if="isLeaseTask(task)">{{ leaseTaskSummary(task) }}</span>
-              <span v-else>{{ task.city }} · {{ task.file_name || task.source_type }} · {{ task.reason }}</span>
-            </div>
-            <div v-if="isLeaseTask(task) && task.status === 'pending'" class="row-actions">
-              <button class="small secondary" @click="addLeaseFollowup(task)">添加回访</button>
-              <button class="small secondary" @click="acknowledgeLeaseTask(task)">已知悉</button>
-              <button v-if="task.followup_count > 0" class="small danger" @click="suppressLeaseTask(task)">不再提示</button>
-            </div>
-            <div v-else-if="!isLeaseTask(task) && canScanImages" class="row-actions">
-              <button class="small secondary" @click="openTask(task)">修改/确认</button>
-              <button class="small danger" @click="deleteTask(task)">删除</button>
-            </div>
-          </div>
+          <el-table :data="tasks" border stripe class="data-table">
+            <el-table-column label="类型" width="100">
+              <template #default="{ row }">{{ taskTypeLabel(row) }}</template>
+            </el-table-column>
+            <el-table-column prop="title" label="标题" min-width="180" />
+            <el-table-column label="内容" min-width="260">
+              <template #default="{ row }">{{ taskSourceText(row) }}</template>
+            </el-table-column>
+            <el-table-column prop="assignee_name" label="负责人" width="120" />
+            <el-table-column prop="handler_name" label="处理人" width="120" />
+            <el-table-column prop="create_time" label="创建时间" width="170" />
+            <el-table-column prop="finish_time" label="处理时间" width="170" />
+            <el-table-column label="操作" width="260" fixed="right">
+              <template #default="{ row }">
+                <div v-if="row.status === 'pending'" class="row-actions">
+                  <el-button v-if="isLeaseTask(row)" size="small" @click="addLeaseFollowup(row)">添加回访</el-button>
+                  <el-button v-if="!isLeaseTask(row) && canScanImages" size="small" @click="openTask(row)">修改/确认</el-button>
+                  <el-button size="small" @click="acknowledgeTask(row)">已知悉</el-button>
+                  <el-button v-if="isLeaseTask(row) && row.followup_count > 0" size="small" type="danger" @click="suppressLeaseTask(row)">不再提示</el-button>
+                </div>
+                <div v-else class="row-actions">
+                  <el-button v-if="canDeleteDoneTask(row)" size="small" type="danger" @click="deleteTask(row)">删除</el-button>
+                </div>
+              </template>
+            </el-table-column>
+          </el-table>
         </section>
 
         <section class="panel">
@@ -1223,23 +1255,32 @@ watch(dutyCalendarDate, (value) => {
             <button class="secondary" @click="loadTasks">刷新</button>
           </div>
         </div>
-        <div v-if="!tasks.length" class="empty">暂无待办</div>
-        <div v-for="task in tasks" :key="task.id" class="task">
-          <div>
-            <strong>{{ task.title }}</strong>
-            <span v-if="isLeaseTask(task)">{{ leaseTaskSummary(task) }}</span>
-            <span v-else>{{ task.city }} · {{ task.file_name || task.source_type }} · {{ task.reason }}</span>
-          </div>
-          <div v-if="isLeaseTask(task) && task.status === 'pending'" class="row-actions">
-            <button class="small secondary" @click="addLeaseFollowup(task)">添加回访</button>
-            <button class="small secondary" @click="acknowledgeLeaseTask(task)">已知悉</button>
-            <button v-if="task.followup_count > 0" class="small danger" @click="suppressLeaseTask(task)">不再提示</button>
-          </div>
-          <div v-else-if="!isLeaseTask(task) && canScanImages" class="row-actions">
-            <button class="small secondary" @click="openTask(task)">修改/确认</button>
-            <button class="small danger" @click="deleteTask(task)">删除</button>
-          </div>
-        </div>
+        <el-table :data="tasks" border stripe class="data-table">
+          <el-table-column label="类型" width="100">
+            <template #default="{ row }">{{ taskTypeLabel(row) }}</template>
+          </el-table-column>
+          <el-table-column prop="title" label="标题" min-width="180" />
+          <el-table-column label="内容" min-width="260">
+            <template #default="{ row }">{{ taskSourceText(row) }}</template>
+          </el-table-column>
+          <el-table-column prop="assignee_name" label="负责人" width="120" />
+          <el-table-column prop="handler_name" label="处理人" width="120" />
+          <el-table-column prop="create_time" label="创建时间" width="170" />
+          <el-table-column prop="finish_time" label="处理时间" width="170" />
+          <el-table-column label="操作" width="260" fixed="right">
+            <template #default="{ row }">
+              <div v-if="row.status === 'pending'" class="row-actions">
+                <el-button v-if="isLeaseTask(row)" size="small" @click="addLeaseFollowup(row)">添加回访</el-button>
+                <el-button v-if="!isLeaseTask(row) && canScanImages" size="small" @click="openTask(row)">修改/确认</el-button>
+                <el-button size="small" @click="acknowledgeTask(row)">已知悉</el-button>
+                <el-button v-if="isLeaseTask(row) && row.followup_count > 0" size="small" type="danger" @click="suppressLeaseTask(row)">不再提示</el-button>
+              </div>
+              <div v-else class="row-actions">
+                <el-button v-if="canDeleteDoneTask(row)" size="small" type="danger" @click="deleteTask(row)">删除</el-button>
+              </div>
+            </template>
+          </el-table-column>
+        </el-table>
       </section>
 
       <section v-if="activePage === 'admin'" class="admin-grid">

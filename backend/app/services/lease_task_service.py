@@ -40,26 +40,7 @@ def _lease_payload(lease: dict[str, Any], days_left: int) -> dict[str, Any]:
     return payload
 
 
-def _find_rental_agent(conn: sqlite3.Connection, lease: dict[str, Any]) -> sqlite3.Row | None:
-    names = [lease.get("agent"), lease.get("maintainor"), lease.get("recorder"), lease.get("creator")]
-    for name in [item for item in names if item]:
-        row = conn.execute(
-            """
-            SELECT u.id, u.store_id
-            FROM users u
-            JOIN user_roles ur ON ur.user_id = u.id
-            JOIN roles r ON r.id = ur.role_id
-            LEFT JOIN cities c ON c.id = u.city_id
-            WHERE u.status = 'active'
-              AND r.code = 'rental_agent'
-              AND COALESCE(c.name, ?) = ?
-              AND (u.username = ? OR u.display_name = ?)
-            LIMIT 1
-            """,
-            (lease.get("city"), lease.get("city"), name, name),
-        ).fetchone()
-        if row:
-            return row
+def _find_rental_clerk(conn: sqlite3.Connection, lease: dict[str, Any]) -> sqlite3.Row | None:
     return conn.execute(
         """
         SELECT u.id, u.store_id
@@ -68,7 +49,7 @@ def _find_rental_agent(conn: sqlite3.Connection, lease: dict[str, Any]) -> sqlit
         JOIN roles r ON r.id = ur.role_id
         LEFT JOIN cities c ON c.id = u.city_id
         WHERE u.status = 'active'
-          AND r.code = 'rental_agent'
+          AND r.code = 'rental_clerk'
           AND COALESCE(c.name, ?) = ?
         ORDER BY u.id
         LIMIT 1
@@ -127,7 +108,7 @@ def generate_lease_expiry_tasks(conn: sqlite3.Connection, city: str | None = Non
         if pending:
             continue
 
-        assignee = _find_rental_agent(conn, lease)
+        assignee = _find_rental_clerk(conn, lease)
         if not assignee:
             continue
         payload = _lease_payload(lease, days_left)
@@ -148,7 +129,7 @@ def generate_lease_expiry_tasks(conn: sqlite3.Connection, city: str | None = Non
                 str(assignee["store_id"]) if assignee["store_id"] is not None else None,
                 "lease",
                 lease_id,
-                "rental_agent",
+                "rental_clerk",
                 assignee["id"],
                 1,
                 json.dumps(payload, ensure_ascii=False),
