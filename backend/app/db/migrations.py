@@ -256,6 +256,30 @@ def migrate() -> None:
                 FOREIGN KEY(operator_user_id) REFERENCES users(id)
             );
 
+            CREATE TABLE IF NOT EXISTS lease_task_followups (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                task_id INTEGER NOT NULL,
+                lease_id INTEGER NOT NULL,
+                operator_user_id INTEGER,
+                content TEXT NOT NULL,
+                create_time TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(task_id) REFERENCES task_items(id),
+                FOREIGN KEY(lease_id) REFERENCES lease_properties(id),
+                FOREIGN KEY(operator_user_id) REFERENCES users(id)
+            );
+
+            CREATE TABLE IF NOT EXISTS lease_reminder_suppressions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                lease_id INTEGER NOT NULL UNIQUE,
+                task_id INTEGER,
+                operator_user_id INTEGER,
+                reason TEXT,
+                create_time TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(lease_id) REFERENCES lease_properties(id),
+                FOREIGN KEY(task_id) REFERENCES task_items(id),
+                FOREIGN KEY(operator_user_id) REFERENCES users(id)
+            );
+
             CREATE TABLE IF NOT EXISTS import_batches (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 import_type TEXT NOT NULL,
@@ -329,6 +353,9 @@ def migrate() -> None:
             CREATE INDEX IF NOT EXISTS idx_source_images_city_date ON source_images(city, business_date);
             CREATE INDEX IF NOT EXISTS idx_task_items_status ON task_items(status);
             CREATE INDEX IF NOT EXISTS idx_task_items_city_status ON task_items(city, status);
+            CREATE INDEX IF NOT EXISTS idx_task_items_type_source ON task_items(task_type, source_type, source_id);
+            CREATE INDEX IF NOT EXISTS idx_task_items_assignee_status ON task_items(assignee_user_id, status);
+            CREATE INDEX IF NOT EXISTS idx_lease_followups_task ON lease_task_followups(task_id);
             CREATE INDEX IF NOT EXISTS idx_auth_sessions_user ON auth_sessions(user_id);
             CREATE INDEX IF NOT EXISTS idx_knowledge_documents_city ON knowledge_documents(city);
             """

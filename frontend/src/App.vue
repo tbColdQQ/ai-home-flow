@@ -43,6 +43,7 @@ const tasks = ref([])
 const selectedTask = ref(null)
 const taskForm = ref({})
 const taskRemark = ref('')
+const taskStatus = ref('pending')
 const dutyMonth = ref(new Date().toISOString().slice(0, 7))
 const dutyCalendarDate = ref(new Date())
 const dutyDays = ref([])
@@ -71,7 +72,8 @@ const isScanning = ref(false)
 const isLoggedIn = computed(() => Boolean(token.value && user.value))
 const isAdmin = computed(() => user.value?.roles?.includes('admin'))
 const isStoreManager = computed(() => user.value?.roles?.includes('store_manager'))
-const canHandleTasks = computed(() => user.value?.roles?.some((role) => ['admin', 'store_manager'].includes(role)))
+const canHandleTasks = computed(() => user.value?.roles?.some((role) => ['admin', 'store_manager', 'rental_agent'].includes(role)))
+const canScanImages = computed(() => user.value?.roles?.some((role) => ['admin', 'store_manager'].includes(role)))
 const canManageUsers = computed(() => isAdmin.value || isStoreManager.value)
 const canEditOrders = computed(() => isAdmin.value || isStoreManager.value)
 const canEditDuty = computed(() => isAdmin.value || isStoreManager.value)
@@ -239,7 +241,12 @@ async function loadLeases() {
 }
 
 async function loadTasks() {
-  tasks.value = await api('/api/tasks')
+  tasks.value = await api(`/api/tasks?status=${taskStatus.value}`)
+}
+
+async function changeTaskStatus(status) {
+  taskStatus.value = status
+  await loadTasks()
 }
 
 async function loadDuty() {
@@ -609,6 +616,65 @@ async function deleteTask(item = selectedTask.value) {
   }
 }
 
+function isLeaseTask(task) {
+  return task?.task_type === 'lease_expiry'
+}
+
+function leaseTaskPayload(task) {
+  if (!task?.payload_json) return {}
+  try {
+    return JSON.parse(task.payload_json)
+  } catch {
+    return {}
+  }
+}
+
+function leaseTaskSummary(task) {
+  const payload = leaseTaskPayload(task)
+  return [
+    payload.community_name || task.community_name,
+    payload.address || task.address,
+    payload.lease_expire_date || task.lease_expire_date,
+    task.assignee_name ? `负责人：${task.assignee_name}` : '',
+  ].filter(Boolean).join(' · ')
+}
+
+async function addLeaseFollowup(task) {
+  const content = window.prompt('请输入回访内容')
+  if (!content) return
+  try {
+    await api(`/api/tasks/${task.id}/lease-followups`, {
+      method: 'POST',
+      body: JSON.stringify({ content }),
+    })
+    message.value = '回访已添加'
+    await loadTasks()
+  } catch (error) {
+    message.value = error.message
+  }
+}
+
+async function acknowledgeLeaseTask(task) {
+  try {
+    await api(`/api/tasks/${task.id}/acknowledge`, { method: 'POST' })
+    message.value = '待办已知悉'
+    await loadTasks()
+  } catch (error) {
+    message.value = error.message
+  }
+}
+
+async function suppressLeaseTask(task) {
+  if (!window.confirm('确认不再提示这套租赁房源的到期提醒？')) return
+  try {
+    await api(`/api/tasks/${task.id}/suppress`, { method: 'POST' })
+    message.value = '已设置不再提示'
+    await loadTasks()
+  } catch (error) {
+    message.value = error.message
+  }
+}
+
 async function saveOrder() {
   try {
     const payload = { ...orderForm.value }
@@ -932,7 +998,7 @@ watch(dutyCalendarDate, (value) => {
           <p>{{ user.display_name }} · {{ user.roles.join(', ') }}</p>
         </div>
         <div class="actions">
-          <button v-if="activePage === 'dashboard' && canHandleTasks" @click="openScanDialog">扫描图片</button>
+          <button v-if="activePage === 'dashboard' && canScanImages" @click="openScanDialog">扫描图片</button>
           <button class="secondary" @click="logout()">退出</button>
         </div>
       </header>
@@ -950,15 +1016,27 @@ watch(dutyCalendarDate, (value) => {
         <section class="panel">
           <div class="panel-header">
             <h2>每日待办</h2>
-            <button class="secondary" @click="loadTasks">刷新</button>
+            <div class="actions">
+              <el-radio-group v-model="taskStatus" size="small" @change="changeTaskStatus">
+                <el-radio-button label="pending">待办</el-radio-button>
+                <el-radio-button label="done">已办</el-radio-button>
+              </el-radio-group>
+              <button class="secondary" @click="loadTasks">刷新</button>
+            </div>
           </div>
           <div v-if="!tasks.length" class="empty">暂无待办</div>
           <div v-for="task in tasks" :key="task.id" class="task">
             <div>
               <strong>{{ task.title }}</strong>
-              <span>{{ task.city }} · {{ task.file_name || task.source_type }} · {{ task.reason }}</span>
+              <span v-if="isLeaseTask(task)">{{ leaseTaskSummary(task) }}</span>
+              <span v-else>{{ task.city }} · {{ task.file_name || task.source_type }} · {{ task.reason }}</span>
             </div>
-            <div v-if="canHandleTasks" class="row-actions">
+            <div v-if="isLeaseTask(task) && task.status === 'pending'" class="row-actions">
+              <button class="small secondary" @click="addLeaseFollowup(task)">添加回访</button>
+              <button class="small secondary" @click="acknowledgeLeaseTask(task)">已知悉</button>
+              <button v-if="task.followup_count > 0" class="small danger" @click="suppressLeaseTask(task)">不再提示</button>
+            </div>
+            <div v-else-if="!isLeaseTask(task) && canScanImages" class="row-actions">
               <button class="small secondary" @click="openTask(task)">修改/确认</button>
               <button class="small danger" @click="deleteTask(task)">删除</button>
             </div>
@@ -1137,15 +1215,27 @@ watch(dutyCalendarDate, (value) => {
       <section v-if="activePage === 'tasks'" class="panel">
         <div class="panel-header">
           <h2>每日待办</h2>
-          <button class="secondary" @click="loadTasks">刷新</button>
+          <div class="actions">
+            <el-radio-group v-model="taskStatus" size="small" @change="changeTaskStatus">
+              <el-radio-button label="pending">待办</el-radio-button>
+              <el-radio-button label="done">已办</el-radio-button>
+            </el-radio-group>
+            <button class="secondary" @click="loadTasks">刷新</button>
+          </div>
         </div>
         <div v-if="!tasks.length" class="empty">暂无待办</div>
         <div v-for="task in tasks" :key="task.id" class="task">
           <div>
             <strong>{{ task.title }}</strong>
-            <span>{{ task.city }} · {{ task.file_name || task.source_type }} · {{ task.reason }}</span>
+            <span v-if="isLeaseTask(task)">{{ leaseTaskSummary(task) }}</span>
+            <span v-else>{{ task.city }} · {{ task.file_name || task.source_type }} · {{ task.reason }}</span>
           </div>
-          <div class="row-actions">
+          <div v-if="isLeaseTask(task) && task.status === 'pending'" class="row-actions">
+            <button class="small secondary" @click="addLeaseFollowup(task)">添加回访</button>
+            <button class="small secondary" @click="acknowledgeLeaseTask(task)">已知悉</button>
+            <button v-if="task.followup_count > 0" class="small danger" @click="suppressLeaseTask(task)">不再提示</button>
+          </div>
+          <div v-else-if="!isLeaseTask(task) && canScanImages" class="row-actions">
             <button class="small secondary" @click="openTask(task)">修改/确认</button>
             <button class="small danger" @click="deleteTask(task)">删除</button>
           </div>
