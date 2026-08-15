@@ -165,6 +165,23 @@ def revoke_session(token: str) -> None:
         conn.commit()
 
 
+def change_password(user_id: int, old_password: str, new_password: str) -> bool:
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT password_hash FROM users WHERE id = ? AND status = 'active'",
+            (user_id,),
+        ).fetchone()
+        if row is None or not verify_password(old_password, row["password_hash"]):
+            return False
+        conn.execute(
+            "UPDATE users SET password_hash = ?, modify_time = CURRENT_TIMESTAMP WHERE id = ?",
+            (hash_password(new_password), user_id),
+        )
+        conn.execute("UPDATE auth_sessions SET revoked = 1 WHERE user_id = ? AND revoked = 0", (user_id,))
+        conn.commit()
+    return True
+
+
 def user_to_dict(user: CurrentUser, token: str | None = None) -> dict:
     payload = {
         "id": user.id,

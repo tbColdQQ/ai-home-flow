@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
 import * as echarts from 'echarts'
+import { ElMessageBox } from 'element-plus'
 
 const apiBase = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
 const token = ref(localStorage.getItem('home_flow_token') || '')
@@ -8,6 +9,9 @@ const user = ref(JSON.parse(localStorage.getItem('home_flow_user') || 'null'))
 const activePage = ref('dashboard')
 const message = ref('')
 const loginForm = ref({ username: 'admin', password: '' })
+const showPasswordDialog = ref(false)
+const passwordForm = ref({ old_password: '', new_password: '', confirm_password: '' })
+const isChangingPassword = ref(false)
 const question = ref('本月哪个小区成交最多？')
 const answer = ref('')
 const isAsking = ref(false)
@@ -220,6 +224,11 @@ function rolePayloadText(text) {
   return String(text || '').split(',').map((item) => item.trim()).filter(Boolean)
 }
 
+function normalizeRoleCodes(value) {
+  if (Array.isArray(value)) return value
+  return rolePayloadText(value)
+}
+
 function resetForms() {
   storeForm.value = { id: null, city_id: cities.value[0]?.id ?? null, name: '', area: '', street: '', status: 'active' }
   roleForm.value = { id: null, code: '', name: '', description: '', permission_codes_text: '' }
@@ -284,7 +293,7 @@ async function loadDuty() {
 async function loadAdminData() {
   if (!canManageUsers.value) return
   const usersData = await api('/api/admin/users')
-  users.value = usersData
+  users.value = usersData.map((item) => ({ ...item, role_codes: normalizeRoleCodes(item.role_codes) }))
   if (!isAdmin.value) return
   const [overviewData, rolesData, permissionsData, citiesData, storesData] = await Promise.all([
     api('/api/admin/overview'),
@@ -905,7 +914,7 @@ async function createUser() {
 
 async function saveUserRoles(item) {
   try {
-    const role_codes = rolePayloadText(item.role_codes)
+    const role_codes = normalizeRoleCodes(item.role_codes)
     await api(`/api/admin/users/${item.id}/roles`, { method: 'PUT', body: JSON.stringify({ role_codes }) })
     message.value = '角色已保存'
     await loadAdminData()
@@ -927,10 +936,50 @@ async function deleteUser(item) {
 
 async function resetUserPassword(item) {
   try {
+    await ElMessageBox.confirm(`确认重置用户 ${item.username} 的密码？`, '重置密码', {
+      confirmButtonText: '确认重置',
+      cancelButtonText: '取消',
+      type: 'warning',
+    })
     const data = await api(`/api/admin/users/${item.id}/reset-password`, { method: 'POST' })
-    message.value = `${item.username} 的新密码：${data.password}`
+    await ElMessageBox.alert(`${item.username} 的新密码：${data.password}`, '重置成功', {
+      confirmButtonText: '知道了',
+    })
+    message.value = '密码已重置'
+  } catch (error) {
+    if (error === 'cancel' || error === 'close') return
+    message.value = error.message
+  }
+}
+
+function openPasswordDialog() {
+  passwordForm.value = { old_password: '', new_password: '', confirm_password: '' }
+  showPasswordDialog.value = true
+}
+
+async function changeMyPassword() {
+  if (passwordForm.value.new_password !== passwordForm.value.confirm_password) {
+    message.value = '两次输入的新密码不一致'
+    return
+  }
+  isChangingPassword.value = true
+  try {
+    await api('/api/auth/change-password', {
+      method: 'POST',
+      body: JSON.stringify({
+        old_password: passwordForm.value.old_password,
+        new_password: passwordForm.value.new_password,
+      }),
+    })
+    showPasswordDialog.value = false
+    await ElMessageBox.alert('密码已修改，请使用新密码重新登录。', '修改成功', {
+      confirmButtonText: '重新登录',
+    })
+    logout(false)
   } catch (error) {
     message.value = error.message
+  } finally {
+    isChangingPassword.value = false
   }
 }
 
@@ -1097,6 +1146,7 @@ watch(dutyCalendarDate, (value) => {
         </div>
         <div class="actions">
           <button v-if="activePage === 'dashboard' && canScanImages" @click="openScanDialog">扫描图片</button>
+          <el-button @click="openPasswordDialog">修改密码</el-button>
           <button class="secondary" @click="logout()">退出</button>
         </div>
       </header>
@@ -1478,7 +1528,19 @@ watch(dutyCalendarDate, (value) => {
                 <td>{{ item.display_name }}</td>
                 <td>{{ item.city }}</td>
                 <td>{{ item.store }}</td>
-                <td><input v-if="isAdmin" v-model="item.role_codes" /><span v-else>{{ item.role_codes }}</span></td>
+                <td>
+                  <el-select
+                    v-if="isAdmin"
+                    v-model="item.role_codes"
+                    multiple
+                    collapse-tags
+                    collapse-tags-tooltip
+                    placeholder="选择角色"
+                  >
+                    <el-option v-for="role in roles" :key="role.code" :label="role.name" :value="role.code" />
+                  </el-select>
+                  <span v-else>{{ normalizeRoleCodes(item.role_codes).join(', ') }}</span>
+                </td>
                 <td class="row-actions">
                   <button v-if="isAdmin" class="small secondary" @click="saveUserRoles(item)">保存</button>
                   <button class="small secondary" @click="resetUserPassword(item)">重置密码</button>
@@ -1603,6 +1665,24 @@ watch(dutyCalendarDate, (value) => {
         </div>
       </section>
     </div>
+
+    <el-dialog v-model="showPasswordDialog" title="修改密码" width="420px">
+      <el-form label-position="top">
+        <el-form-item label="原密码">
+          <el-input v-model="passwordForm.old_password" type="password" show-password />
+        </el-form-item>
+        <el-form-item label="新密码">
+          <el-input v-model="passwordForm.new_password" type="password" show-password />
+        </el-form-item>
+        <el-form-item label="确认新密码">
+          <el-input v-model="passwordForm.confirm_password" type="password" show-password @keyup.enter="changeMyPassword" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showPasswordDialog = false">取消</el-button>
+        <el-button type="primary" :loading="isChangingPassword" @click="changeMyPassword">保存</el-button>
+      </template>
+    </el-dialog>
 
     <el-dialog
       :model-value="Boolean(selectedDutyDay)"
