@@ -78,8 +78,6 @@ async def upload_knowledge(
 
 @router.get("/knowledge")
 def list_knowledge(user: CurrentUser = Depends(current_user)) -> list[dict]:
-    if "admin" not in user.role_codes:
-        raise HTTPException(status_code=403, detail="需要管理员权限")
     with get_connection() as conn:
         return list_knowledge_documents(conn, user)
 

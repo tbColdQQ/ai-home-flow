@@ -1,0 +1,239 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  color: #111827;
+  background: #f3f6fb;
+  font-family: Inter, "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+.login-page {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: linear-gradient(180deg, #0f172a 0%, #1d4ed8 100%);
+}
+
+.login-card {
+  width: min(100%, 380px);
+  display: grid;
+  gap: 20px;
+  padding: 24px;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 18px 50px rgba(15, 23, 42, 0.25);
+}
+
+.login-card h1 {
+  margin: 0 0 4px;
+  font-size: 30px;
+}
+
+.login-card p {
+  margin: 0;
+  color: #64748b;
+}
+
+.login-card .el-button,
+.upload-card .el-button,
+.password-card .el-button,
+.logout-button {
+  width: 100%;
+}
+
+.h5-shell {
+  min-height: 100vh;
+  padding: 74px 14px 84px;
+}
+
+.h5-header {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  color: #fff;
+  background: #101827;
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.16);
+}
+
+.h5-header div {
+  display: grid;
+  gap: 2px;
+}
+
+.h5-header strong {
+  font-size: 20px;
+}
+
+.h5-header span,
+.h5-header p {
+  margin: 0;
+  color: #cbd5e1;
+  font-size: 13px;
+}
+
+.notice {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  color: #1d4ed8;
+  background: #eff6ff;
+}
+
+.page {
+  display: grid;
+  gap: 14px;
+}
+
+.chat-card,
+.answer-card,
+.upload-card,
+.knowledge-list,
+.profile-card,
+.password-card {
+  padding: 16px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.chat-card {
+  display: grid;
+  gap: 12px;
+}
+
+.answer-card {
+  min-height: 160px;
+  white-space: pre-line;
+  line-height: 1.8;
+  font-weight: 600;
+}
+
+.upload-card h2,
+.knowledge-list h2,
+.profile-card h2,
+.password-card h2 {
+  margin: 0 0 12px;
+  font-size: 18px;
+}
+
+.upload-card .el-select {
+  width: 100%;
+}
+
+.section-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.section-title h2 {
+  margin: 0;
+}
+
+.knowledge-item {
+  display: grid;
+  gap: 8px;
+  padding: 12px 0;
+  border-top: 1px solid #e5e7eb;
+}
+
+.knowledge-item:first-of-type {
+  border-top: 0;
+}
+
+.knowledge-item div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.knowledge-item strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.knowledge-item p,
+.knowledge-item span,
+.profile-card p {
+  margin: 0;
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.knowledge-item span {
+  color: #334155;
+}
+
+.profile-card {
+  background: #102033;
+  color: #fff;
+}
+
+.profile-card p {
+  color: #cbd5e1;
+}
+
+.logout-button {
+  border-color: #fecaca;
+  color: #dc2626;
+  background: #fff;
+}
+
+.bottom-nav {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 10;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  padding: 6px 10px max(6px, env(safe-area-inset-bottom));
+  border-top: 1px solid #e2e8f0;
+  background: #fff;
+}
+
+.bottom-nav button {
+  display: grid;
+  place-items: center;
+  gap: 2px;
+  min-height: 52px;
+  border: 0;
+  color: #64748b;
+  background: transparent;
+}
+
+.bottom-nav .el-icon {
+  font-size: 22px;
+}
+
+.bottom-nav span {
+  font-size: 12px;
+}
+
+.bottom-nav button.active {
+  color: #2563eb;
+  font-weight: 700;
+}

@@ -165,18 +165,24 @@ def create_knowledge_document(
 
 
 def list_knowledge_documents(conn, user: CurrentUser) -> list[dict]:
+    where_sql = "1 = 1"
+    params: tuple = ()
     if "admin" not in user.role_codes:
-        return []
+        where_sql = "kd.status = 'active' AND kd.city = ?"
+        params = (user.city,)
     rows = conn.execute(
-        """
+        f"""
         SELECT kd.id, kd.title, kd.city, kd.community_name, kd.knowledge_type, kd.source_type,
                kd.source_file, kd.version, kd.status, kd.create_time, kd.modify_time,
-               u.display_name AS uploader
+               u.display_name AS uploader,
+               SUBSTR(kd.content, 1, 240) AS summary
         FROM knowledge_documents kd
         LEFT JOIN users u ON u.id = kd.uploader_user_id
+        WHERE {where_sql}
         ORDER BY kd.id DESC
         LIMIT 200
-        """
+        """,
+        params,
     ).fetchall()
     return rows_to_dicts(rows)
 
