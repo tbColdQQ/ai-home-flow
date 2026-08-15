@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref } from 'vue'
 import { ChatDotRound, Collection, User } from '@element-plus/icons-vue'
 import { ElMessageBox } from 'element-plus'
 
@@ -11,7 +11,10 @@ const message = ref('')
 const loginForm = ref({ username: '', password: '' })
 const isLoggingIn = ref(false)
 const question = ref('')
-const answer = ref('')
+const chatScrollRef = ref(null)
+const chatMessages = ref([
+  { role: 'assistant', content: '你好，我可以帮你查询成交数据，也可以回答知识库里的楼盘、学区等信息。' },
+])
 const isAsking = ref(false)
 const knowledgeList = ref([])
 const isLoadingKnowledge = ref(false)
@@ -25,6 +28,10 @@ const knowledgeForm = ref({
 })
 const passwordForm = ref({ old_password: '', new_password: '', confirm_password: '' })
 const isChangingPassword = ref(false)
+const pendingTasks = ref([])
+const doneTasks = ref([])
+const mineTaskTab = ref('pending')
+const isLoadingTasks = ref(false)
 
 const isLoggedIn = computed(() => Boolean(token.value && user.value))
 const roleText = computed(() => (user.value?.roles || []).join(', '))
@@ -78,7 +85,6 @@ async function login() {
     user.value = data
     localStorage.setItem('home_flow_h5_token', data.token)
     localStorage.setItem('home_flow_h5_user', JSON.stringify(data))
-    await loadKnowledge()
   } catch (error) {
     message.value = error.message
   } finally {
@@ -110,19 +116,28 @@ async function ask() {
   const text = question.value.trim()
   if (!text || isAsking.value) return
   isAsking.value = true
-  answer.value = ''
+  chatMessages.value.push({ role: 'user', content: text })
+  question.value = ''
   message.value = ''
+  await scrollChatToBottom()
   try {
     const data = await api('/api/qa/ask', {
       method: 'POST',
       body: JSON.stringify({ question: text }),
     })
-    answer.value = formatAnswer(data.answer)
+    chatMessages.value.push({ role: 'assistant', content: formatAnswer(data.answer) })
   } catch (error) {
-    message.value = error.message
+    chatMessages.value.push({ role: 'assistant', content: error.message })
   } finally {
     isAsking.value = false
+    await scrollChatToBottom()
   }
+}
+
+async function scrollChatToBottom() {
+  await nextTick()
+  const el = chatScrollRef.value
+  if (el) el.scrollTop = el.scrollHeight
 }
 
 async function loadKnowledge() {
@@ -192,18 +207,52 @@ async function changePassword() {
   }
 }
 
+function taskDescription(task) {
+  const parts = [
+    task.reason,
+    task.community_name,
+    task.address,
+    task.file_name,
+  ].filter(Boolean)
+  return parts.join(' · ') || task.title
+}
+
+async function loadTasks() {
+  if (!isLoggedIn.value || isLoadingTasks.value) return
+  isLoadingTasks.value = true
+  try {
+    const [pending, done] = await Promise.all([
+      api('/api/tasks?status=pending'),
+      api('/api/tasks?status=done'),
+    ])
+    pendingTasks.value = pending
+    doneTasks.value = done
+  } catch (error) {
+    message.value = error.message
+  } finally {
+    isLoadingTasks.value = false
+  }
+}
+
+async function acknowledgeTask(task) {
+  try {
+    await api(`/api/tasks/${task.id}/acknowledge`, { method: 'POST' })
+    message.value = '待办已转为已办'
+    await loadTasks()
+  } catch (error) {
+    message.value = error.message
+  }
+}
+
 function switchTab(name) {
   activeTab.value = name
   if (name === 'knowledge') loadKnowledge()
+  if (name === 'mine') loadTasks()
 }
 
 onMounted(async () => {
   if (isLoggedIn.value) {
-    try {
-      await loadKnowledge()
-    } catch {
-      logout(false)
-    }
+    await scrollChatToBottom()
   }
 })
 </script>
@@ -239,18 +288,33 @@ onMounted(async () => {
 
     <p v-if="message" class="notice">{{ message }}</p>
 
-    <section v-show="activeTab === 'chat'" class="page">
-      <div class="chat-card">
+    <section v-show="activeTab === 'chat'" class="chat-page">
+      <div ref="chatScrollRef" class="chat-thread">
+        <article
+          v-for="(item, index) in chatMessages"
+          :key="index"
+          class="chat-message"
+          :class="item.role"
+        >
+          <div class="avatar">{{ item.role === 'user' ? '我' : 'AI' }}</div>
+          <p>{{ item.content }}</p>
+        </article>
+        <article v-if="isAsking" class="chat-message assistant">
+          <div class="avatar">AI</div>
+          <p>正在思考...</p>
+        </article>
+      </div>
+      <div class="chat-composer">
         <el-input
           v-model="question"
           type="textarea"
-          :rows="4"
-          placeholder="问成交数据、楼盘资料、学区信息..."
+          autosize
+          resize="none"
+          placeholder="发送消息"
+          @keyup.enter.exact.prevent="ask"
         />
         <el-button type="primary" :loading="isAsking" @click="ask">发送</el-button>
       </div>
-      <el-skeleton v-if="isAsking" :rows="5" animated />
-      <article v-else-if="answer" class="answer-card">{{ answer }}</article>
     </section>
 
     <section v-show="activeTab === 'knowledge'" class="page">
@@ -312,6 +376,39 @@ onMounted(async () => {
         <h2>{{ user.display_name }}</h2>
         <p>{{ user.username }}</p>
         <p>{{ user.city }} · {{ roleText }}</p>
+      </section>
+      <section class="task-card">
+        <div class="section-title">
+          <h2>待办已办</h2>
+          <el-button size="small" :loading="isLoadingTasks" @click="loadTasks">刷新</el-button>
+        </div>
+        <el-tabs v-model="mineTaskTab">
+          <el-tab-pane :label="`待办 ${pendingTasks.length}`" name="pending">
+            <article v-for="task in pendingTasks" :key="task.id" class="task-item">
+              <div>
+                <strong>{{ task.title }}</strong>
+                <el-tag size="small" type="warning" effect="plain">待办</el-tag>
+              </div>
+              <p>{{ taskDescription(task) }}</p>
+              <span>创建时间：{{ task.create_time || '-' }}</span>
+              <el-button size="small" type="primary" @click="acknowledgeTask(task)">已知悉</el-button>
+            </article>
+            <el-empty v-if="!isLoadingTasks && !pendingTasks.length" description="暂无待办" />
+          </el-tab-pane>
+          <el-tab-pane :label="`已办 ${doneTasks.length}`" name="done">
+            <article v-for="task in doneTasks" :key="task.id" class="task-item done">
+              <div>
+                <strong>{{ task.title }}</strong>
+                <el-tag size="small" type="success" effect="plain">已办</el-tag>
+              </div>
+              <p>{{ taskDescription(task) }}</p>
+              <span>处理人：{{ task.handler_name || '-' }}</span>
+              <span>创建时间：{{ task.create_time || '-' }}</span>
+              <span>完成时间：{{ task.finish_time || '-' }}</span>
+            </article>
+            <el-empty v-if="!isLoadingTasks && !doneTasks.length" description="暂无已办" />
+          </el-tab-pane>
+        </el-tabs>
       </section>
       <section class="password-card">
         <h2>修改密码</h2>
