@@ -305,6 +305,34 @@ p {
   gap: 12px;
 }
 
+.qa-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  gap: 18px;
+  align-items: start;
+}
+
+.qa-main,
+.knowledge-upload {
+  min-width: 0;
+}
+
+.knowledge-upload {
+  padding: 16px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.knowledge-upload .el-select,
+.knowledge-upload .el-button {
+  width: 100%;
+}
+
+.qa-skeleton {
+  margin: 14px 0;
+}
+
 .answer {
   min-height: 30px;
   margin: 14px 0;
@@ -322,6 +350,38 @@ p {
   height: 320px;
   border: 1px solid #edf2f7;
   border-radius: 6px;
+}
+
+.knowledge-sources {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.knowledge-sources h3 {
+  width: 100%;
+  margin: 0;
+  font-size: 14px;
+  color: #475569;
+}
+
+.knowledge-admin {
+  display: grid;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.knowledge-admin-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.knowledge-admin-header h3 {
+  margin: 0;
+  font-size: 15px;
 }
 
 table {
@@ -658,6 +718,7 @@ th {
   .topbar,
   .actions,
   .qa,
+  .qa-layout,
   .form-grid,
   .filters,
   .duty-roster-editor {

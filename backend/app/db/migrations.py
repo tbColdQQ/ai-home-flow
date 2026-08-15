@@ -338,6 +338,19 @@ def migrate() -> None:
                 modify_time TEXT
             );
 
+            CREATE TABLE IF NOT EXISTS knowledge_chunks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                document_id INTEGER NOT NULL,
+                city TEXT,
+                community_name TEXT,
+                knowledge_type TEXT,
+                chunk_index INTEGER NOT NULL,
+                content TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'active',
+                create_time TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(document_id) REFERENCES knowledge_documents(id)
+            );
+
             CREATE INDEX IF NOT EXISTS idx_orders_city_date ON orders(city, signing_date);
             CREATE INDEX IF NOT EXISTS idx_orders_city_residential ON orders(city, residential);
             CREATE INDEX IF NOT EXISTS idx_orders_city_store ON orders(city, store);
@@ -358,8 +371,23 @@ def migrate() -> None:
             CREATE INDEX IF NOT EXISTS idx_lease_followups_task ON lease_task_followups(task_id);
             CREATE INDEX IF NOT EXISTS idx_auth_sessions_user ON auth_sessions(user_id);
             CREATE INDEX IF NOT EXISTS idx_knowledge_documents_city ON knowledge_documents(city);
+            CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_city ON knowledge_chunks(city);
+            CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_document ON knowledge_chunks(document_id);
             """
         )
+
+        for column, definition in [
+            ("community_name", "TEXT"),
+            ("knowledge_type", "TEXT"),
+            ("source_type", "TEXT"),
+            ("source_file", "TEXT"),
+            ("file_path", "TEXT"),
+            ("uploader_user_id", "INTEGER"),
+            ("version", "INTEGER NOT NULL DEFAULT 1"),
+            ("archived_time", "TEXT"),
+            ("error_message", "TEXT"),
+        ]:
+            _add_column(conn, "knowledge_documents", column, definition)
 
         conn.execute(
             "INSERT OR IGNORE INTO cities(name, code) VALUES (?, ?)",

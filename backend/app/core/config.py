@@ -25,6 +25,7 @@ class Settings:
     def __init__(self) -> None:
         self.db_path = Path(os.getenv("HOME_FLOW_DB_PATH", ROOT_DIR / "data" / "storage" / "home_flow.db"))
         self.image_root = Path(os.getenv("HOME_FLOW_IMAGE_ROOT", ROOT_DIR / "data" / "incoming"))
+        self.knowledge_root = Path(os.getenv("HOME_FLOW_KNOWLEDGE_ROOT", ROOT_DIR / "data" / "knowledge"))
         self.default_city = os.getenv("HOME_FLOW_DEFAULT_CITY", "\u5b81\u6ce2\u5e02")
         self.ocr_provider = os.getenv("HOME_FLOW_OCR_PROVIDER", "rapidocr").lower()
         self.ocr_min_score = float(os.getenv("HOME_FLOW_OCR_MIN_SCORE", "0.45"))
@@ -35,6 +36,11 @@ class Settings:
         self.llm_base_url = os.getenv("HOME_FLOW_LLM_BASE_URL", "https://api.deepseek.com")
         self.llm_model = os.getenv("HOME_FLOW_LLM_MODEL", "deepseek-chat")
         self.llm_timeout_seconds = float(os.getenv("HOME_FLOW_LLM_TIMEOUT_SECONDS", "30"))
+        # Reserved for the later admin-managed cost-control settings page.
+        self.llm_daily_user_limit = int(os.getenv("HOME_FLOW_LLM_DAILY_USER_LIMIT", "0"))
+        self.llm_daily_token_limit = int(os.getenv("HOME_FLOW_LLM_DAILY_TOKEN_LIMIT", "0"))
+        self.llm_max_input_chars = int(os.getenv("HOME_FLOW_LLM_MAX_INPUT_CHARS", "0"))
+        self.llm_max_output_tokens = int(os.getenv("HOME_FLOW_LLM_MAX_OUTPUT_TOKENS", "0"))
 
 
 settings = Settings()

@@ -42,9 +42,12 @@ Rules:
 
 ANSWER_PROMPT = """
 You are home-flow's Chinese business analyst.
-Answer the user's question in concise Chinese based only on the SQL result JSON.
-If there is no data, say no matching transaction data was found and mention the likely filter period/condition.
+Answer the user's question in concise Chinese based only on the SQL result JSON and rag_context.
+SQL rows are transaction data. rag_context is uploaded knowledge such as community basics, school district information, and text extracted from PDFs or images.
+If SQL rows are empty but rag_context is relevant, answer from rag_context and mention the knowledge title/source.
+If both SQL rows and rag_context are empty, say no matching internal data was found.
 For ranking results, name the top item and include its count. Add one short insight if useful.
+When uploaded knowledge conflicts, the context has already been filtered to active latest documents, so treat later active knowledge as authoritative.
 Do not invent data.
 """.strip()
 
@@ -61,6 +64,13 @@ def llm_config_summary() -> dict[str, Any]:
         "base_url": settings.llm_base_url,
         "has_api_key": bool(settings.llm_api_key),
         "framework": "langchain",
+        "cost_controls_reserved": {
+            "daily_user_limit": settings.llm_daily_user_limit,
+            "daily_token_limit": settings.llm_daily_token_limit,
+            "max_input_chars": settings.llm_max_input_chars,
+            "max_output_tokens": settings.llm_max_output_tokens,
+            "enforced": False,
+        },
     }
 
 

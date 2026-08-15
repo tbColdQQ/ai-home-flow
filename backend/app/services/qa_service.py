@@ -152,7 +152,12 @@ def _choose_sql_payload(question: str, rag_context: list[dict]) -> tuple[dict[st
     return _fallback_sql(question), validation_error or "llm_sql_invalid"
 
 
-def _fallback_answer(question: str, rows: list[dict]) -> str:
+def _fallback_answer(question: str, rows: list[dict], rag_context: list[dict]) -> str:
+    if not rows and rag_context:
+        first = rag_context[0]
+        content = str(first.get("content") or "").strip()
+        source = first.get("title") or first.get("community_name") or "知识库"
+        return f"根据知识库《{source}》：\n{content[:500]}"
     if not rows:
         return "\u6ca1\u6709\u67e5\u8be2\u5230\u7b26\u5408\u6761\u4ef6\u7684\u6210\u4ea4\u6570\u636e\u3002"
     first = rows[0]
@@ -196,7 +201,7 @@ def answer_question(conn, question: str, city: str) -> dict:
     answer = summarize_answer_with_llm(clean_question, sql_payload["sql"], rows, rag_context)
     answer_source = "llm" if answer else "fallback"
     if not answer:
-        answer = _fallback_answer(clean_question, rows)
+        answer = _fallback_answer(clean_question, rows, rag_context)
 
     return {
         "answer": answer,

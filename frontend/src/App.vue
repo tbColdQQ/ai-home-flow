@@ -63,6 +63,16 @@ const permissionForm = ref({ id: null, code: '', name: '', permission_type: 'api
 const chartRef = ref(null)
 const excelInputRef = ref(null)
 const leaseExcelInputRef = ref(null)
+const knowledgeFileList = ref([])
+const knowledgeSources = ref([])
+const knowledgeDocuments = ref([])
+const knowledgeForm = ref({
+  title: '',
+  community_name: '',
+  knowledge_type: '楼盘信息',
+  content: '',
+})
+const isUploadingKnowledge = ref(false)
 const importing = ref(false)
 const importingLeases = ref(false)
 const showScanDialog = ref(false)
@@ -143,6 +153,21 @@ async function api(path, options = {}) {
   const res = await fetch(`${apiBase}${path}`, {
     ...options,
     headers: { ...authHeaders(), ...(options.headers || {}) },
+  })
+  if (res.status === 401) {
+    logout(false)
+    throw new Error('登录已失效')
+  }
+  const data = await res.json()
+  if (!res.ok) throw new Error(data.detail || data.error || '请求失败')
+  return data
+}
+
+async function apiForm(path, formData) {
+  const res = await fetch(`${apiBase}${path}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token.value}` },
+    body: formData,
   })
   if (res.status === 401) {
     logout(false)
@@ -278,7 +303,12 @@ async function loadAdminData() {
 
 async function loadAll() {
   message.value = ''
-  await Promise.all([loadOrders(), loadLeases(), loadTasks(), loadDuty(), loadAdminData()])
+  await Promise.all([loadOrders(), loadLeases(), loadTasks(), loadDuty(), loadAdminData(), loadKnowledgeDocuments()])
+}
+
+async function loadKnowledgeDocuments() {
+  if (!isAdmin.value) return
+  knowledgeDocuments.value = await api('/api/qa/knowledge')
 }
 
 async function applyOrderFilters() {
@@ -788,12 +818,14 @@ async function ask() {
   if (isAsking.value) return
   isAsking.value = true
   answer.value = '正在查询...'
+  knowledgeSources.value = []
   try {
     const data = await api('/api/qa/ask', {
       method: 'POST',
       body: JSON.stringify({ question: question.value }),
     })
     answer.value = formatAnswer(data.answer)
+    knowledgeSources.value = data.rag_context || []
     if (data.chart && chartRef.value) {
       const chart = echarts.getInstanceByDom(chartRef.value) || echarts.init(chartRef.value)
       chart.setOption({
@@ -808,6 +840,49 @@ async function ask() {
     answer.value = error.message
   } finally {
     isAsking.value = false
+  }
+}
+
+function handleKnowledgeFileChange(file, files) {
+  knowledgeFileList.value = files.slice(-1)
+}
+
+function handleKnowledgeFileRemove() {
+  knowledgeFileList.value = []
+}
+
+async function uploadKnowledge() {
+  if (isUploadingKnowledge.value) return
+  isUploadingKnowledge.value = true
+  message.value = ''
+  try {
+    const form = new FormData()
+    form.append('title', knowledgeForm.value.title)
+    form.append('knowledge_type', knowledgeForm.value.knowledge_type)
+    form.append('community_name', knowledgeForm.value.community_name || '')
+    form.append('content', knowledgeForm.value.content || '')
+    const rawFile = knowledgeFileList.value[0]?.raw
+    if (rawFile) form.append('file', rawFile)
+    const result = await apiForm('/api/qa/knowledge', form)
+    message.value = `知识已上传：版本 ${result.version}，分块 ${result.chunks}`
+    knowledgeForm.value = { title: '', community_name: '', knowledge_type: '楼盘信息', content: '' }
+    knowledgeFileList.value = []
+    await loadKnowledgeDocuments()
+  } catch (error) {
+    message.value = error.message
+  } finally {
+    isUploadingKnowledge.value = false
+  }
+}
+
+async function deleteKnowledgeDocument(item) {
+  if (!window.confirm(`确认归档知识 ${item.title}？`)) return
+  try {
+    await api(`/api/qa/knowledge/${item.id}`, { method: 'DELETE' })
+    message.value = '知识已归档'
+    await loadKnowledgeDocuments()
+  } catch (error) {
+    message.value = error.message
   }
 }
 
@@ -1235,13 +1310,99 @@ watch(dutyCalendarDate, (value) => {
         />
       </section>
 
-      <section v-if="activePage === 'qa'" class="panel">
-        <div class="qa">
-          <input v-model="question" :disabled="isAsking" @keyup.enter="ask" />
-          <button :disabled="isAsking" @click="ask">{{ isAsking ? '查询中...' : '提问' }}</button>
+      <section v-if="activePage === 'qa'" class="panel qa-panel">
+        <div class="qa-layout">
+          <div class="qa-main">
+            <h2>智能问答</h2>
+            <div class="qa">
+              <el-input
+                v-model="question"
+                :disabled="isAsking"
+                placeholder="请输入成交数据或楼盘知识相关问题"
+                @keyup.enter="ask"
+              />
+              <el-button type="primary" :loading="isAsking" @click="ask">提问</el-button>
+            </div>
+            <el-skeleton v-if="isAsking" :rows="4" animated class="qa-skeleton" />
+            <p v-else class="answer">{{ answer }}</p>
+            <div v-if="knowledgeSources.length" class="knowledge-sources">
+              <h3>命中知识</h3>
+              <el-tag
+                v-for="item in knowledgeSources"
+                :key="`${item.id}-${item.title}`"
+                class="knowledge-source"
+                type="info"
+                effect="plain"
+              >
+                {{ item.title }} · v{{ item.version }}
+              </el-tag>
+            </div>
+            <div ref="chartRef" class="chart"></div>
+          </div>
+
+          <el-form class="knowledge-upload" label-position="top">
+            <h2>上传知识</h2>
+            <el-form-item label="标题">
+              <el-input v-model="knowledgeForm.title" placeholder="例如：公元世家三期楼盘资料" />
+            </el-form-item>
+            <el-form-item label="楼盘">
+              <el-input v-model="knowledgeForm.community_name" placeholder="可选，用于同楼盘新版覆盖旧版" />
+            </el-form-item>
+            <el-form-item label="知识类型">
+              <el-select v-model="knowledgeForm.knowledge_type">
+                <el-option label="楼盘信息" value="楼盘信息" />
+                <el-option label="学区信息" value="学区信息" />
+                <el-option label="交易规则" value="交易规则" />
+                <el-option label="其他" value="其他" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="文字内容">
+              <el-input
+                v-model="knowledgeForm.content"
+                type="textarea"
+                :rows="6"
+                placeholder="可直接粘贴文字，也可以配合上传 PDF 或图片"
+              />
+            </el-form-item>
+            <el-form-item label="文件">
+              <el-upload
+                v-model:file-list="knowledgeFileList"
+                :auto-upload="false"
+                :limit="1"
+                accept=".pdf,.txt,.md,.jpg,.jpeg,.png,.bmp,.webp"
+                :on-change="handleKnowledgeFileChange"
+                :on-remove="handleKnowledgeFileRemove"
+              >
+                <el-button>选择文件</el-button>
+              </el-upload>
+            </el-form-item>
+            <el-button type="primary" :loading="isUploadingKnowledge" @click="uploadKnowledge">上传到知识库</el-button>
+            <div v-if="isAdmin" class="knowledge-admin">
+              <div class="knowledge-admin-header">
+                <h3>知识管理</h3>
+                <el-button size="small" @click="loadKnowledgeDocuments">刷新</el-button>
+              </div>
+              <el-table :data="knowledgeDocuments" size="small" height="260">
+                <el-table-column prop="title" label="标题" min-width="140" show-overflow-tooltip />
+                <el-table-column prop="knowledge_type" label="类型" width="90" />
+                <el-table-column prop="version" label="版本" width="70" />
+                <el-table-column prop="status" label="状态" width="80" />
+                <el-table-column label="操作" width="80" fixed="right">
+                  <template #default="{ row }">
+                    <el-button
+                      v-if="row.status === 'active'"
+                      size="small"
+                      type="danger"
+                      @click="deleteKnowledgeDocument(row)"
+                    >
+                      归档
+                    </el-button>
+                  </template>
+                </el-table-column>
+              </el-table>
+            </div>
+          </el-form>
         </div>
-        <p class="answer" :class="{ loading: isAsking }">{{ answer }}</p>
-        <div ref="chartRef" class="chart"></div>
       </section>
 
       <section v-if="activePage === 'tasks'" class="panel">
