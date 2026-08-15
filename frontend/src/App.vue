@@ -153,8 +153,16 @@ function authHeaders() {
   return { Authorization: `Bearer ${token.value}`, 'Content-Type': 'application/json' }
 }
 
+function apiUrl(path) {
+  const base = String(apiBase || '').replace(/\/$/, '')
+  if (base.endsWith('/api') && path.startsWith('/api/')) {
+    return `${base}${path.slice(4)}`
+  }
+  return `${base}${path}`
+}
+
 async function api(path, options = {}) {
-  const res = await fetch(`${apiBase}${path}`, {
+  const res = await fetch(apiUrl(path), {
     ...options,
     headers: { ...authHeaders(), ...(options.headers || {}) },
   })
@@ -168,7 +176,7 @@ async function api(path, options = {}) {
 }
 
 async function apiForm(path, formData) {
-  const res = await fetch(`${apiBase}${path}`, {
+  const res = await fetch(apiUrl(path), {
     method: 'POST',
     headers: { Authorization: `Bearer ${token.value}` },
     body: formData,
@@ -185,7 +193,7 @@ async function apiForm(path, formData) {
 async function login() {
   message.value = ''
   try {
-    const res = await fetch(`${apiBase}/api/auth/login`, {
+    const res = await fetch(apiUrl('/api/auth/login'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(loginForm.value),
@@ -563,7 +571,7 @@ async function uploadLeaseExcel(event) {
   try {
     const form = new FormData()
     form.append('file', file)
-    const res = await fetch(`${apiBase}/api/leases/import-excel`, {
+    const res = await fetch(apiUrl('/api/leases/import-excel'), {
       method: 'POST',
       headers: { Authorization: `Bearer ${token.value}` },
       body: form,
@@ -806,7 +814,7 @@ async function uploadExcel(event) {
   try {
     const form = new FormData()
     form.append('file', file)
-    const res = await fetch(`${apiBase}/api/orders/import-excel`, {
+    const res = await fetch(apiUrl('/api/orders/import-excel'), {
       method: 'POST',
       headers: { Authorization: `Bearer ${token.value}` },
       body: form,

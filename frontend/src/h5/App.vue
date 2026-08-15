@@ -40,8 +40,16 @@ function authHeaders() {
   return { Authorization: `Bearer ${token.value}`, 'Content-Type': 'application/json' }
 }
 
+function apiUrl(path) {
+  const base = String(apiBase || '').replace(/\/$/, '')
+  if (base.endsWith('/api') && path.startsWith('/api/')) {
+    return `${base}${path.slice(4)}`
+  }
+  return `${base}${path}`
+}
+
 async function api(path, options = {}) {
-  const res = await fetch(`${apiBase}${path}`, {
+  const res = await fetch(apiUrl(path), {
     ...options,
     headers: { ...authHeaders(), ...(options.headers || {}) },
   })
@@ -55,7 +63,7 @@ async function api(path, options = {}) {
 }
 
 async function apiForm(path, formData) {
-  const res = await fetch(`${apiBase}${path}`, {
+  const res = await fetch(apiUrl(path), {
     method: 'POST',
     headers: { Authorization: `Bearer ${token.value}` },
     body: formData,
@@ -74,7 +82,7 @@ async function login() {
   isLoggingIn.value = true
   message.value = ''
   try {
-    const res = await fetch(`${apiBase}/api/auth/login`, {
+    const res = await fetch(apiUrl('/api/auth/login'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(loginForm.value),
