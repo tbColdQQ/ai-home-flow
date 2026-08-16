@@ -83,6 +83,8 @@ const importingLeases = ref(false)
 const showScanDialog = ref(false)
 const scanDate = ref(new Date().toISOString().slice(0, 10))
 const isScanning = ref(false)
+const isUploadingImages = ref(false)
+const imageUploadFileList = ref([])
 
 const isLoggedIn = computed(() => Boolean(token.value && user.value))
 const isAdmin = computed(() => user.value?.roles?.includes('admin'))
@@ -806,6 +808,14 @@ function closeScanDialog() {
   showScanDialog.value = false
 }
 
+function handleImageFileChange(_file, files) {
+  imageUploadFileList.value = files
+}
+
+function handleImageFileRemove(_file, files) {
+  imageUploadFileList.value = files
+}
+
 async function scanImages() {
   if (!scanDate.value || isScanning.value) return
   isScanning.value = true
@@ -821,6 +831,36 @@ async function scanImages() {
     message.value = error.message
   } finally {
     isScanning.value = false
+  }
+}
+
+async function uploadImages(scanAfterUpload = false) {
+  if (!scanDate.value || isUploadingImages.value) return
+  const files = imageUploadFileList.value.map((item) => item.raw).filter(Boolean)
+  if (!files.length) {
+    message.value = '请选择要上传的成交图片'
+    return
+  }
+  isUploadingImages.value = true
+  try {
+    const form = new FormData()
+    form.append('business_date', scanDate.value)
+    form.append('scan_after_upload', scanAfterUpload ? 'true' : 'false')
+    files.forEach((file) => form.append('files', file))
+    const data = await apiForm('/api/images/upload', form)
+    imageUploadFileList.value = []
+    if (data.scan) {
+      const scan = data.scan
+      message.value = `上传 ${data.uploaded} 张并扫描完成：入库 ${scan.confirmed} 条，合并 ${scan.merged ?? 0} 条，待确认 ${scan.pending} 条，跳过 ${scan.skipped} 张，失败 ${scan.failed} 张`
+      showScanDialog.value = false
+      await loadAll()
+    } else {
+      message.value = `上传完成：${data.uploaded} 张图片已保存到 ${data.business_date} 目录`
+    }
+  } catch (error) {
+    message.value = error.message
+  } finally {
+    isUploadingImages.value = false
   }
 }
 
@@ -1203,7 +1243,7 @@ watch(dutyCalendarDate, (value) => {
           <p>{{ user.display_name }} · {{ user.roles.join(', ') }}</p>
         </div>
         <div class="actions">
-          <button v-if="activePage === 'dashboard' && canScanImages" @click="openScanDialog">扫描图片</button>
+          <button v-if="activePage === 'dashboard' && canScanImages" @click="openScanDialog">上传/扫描图片</button>
           <el-button @click="openPasswordDialog">修改密码</el-button>
           <button class="secondary" @click="logout()">退出</button>
         </div>
@@ -1704,26 +1744,45 @@ watch(dutyCalendarDate, (value) => {
       </section>
     </section>
 
-    <div v-if="showScanDialog" class="dialog-backdrop" @click.self="closeScanDialog">
-      <section class="dialog small-dialog">
-        <div class="panel-header">
-          <h2>选择扫描日期</h2>
-          <button class="secondary" @click="closeScanDialog">关闭</button>
-        </div>
-        <div class="form-grid single">
-          <label>
-            图片日期
-            <input v-model="scanDate" type="date" />
-          </label>
-        </div>
-        <div class="actions">
-          <button :disabled="!scanDate || isScanning" @click="scanImages">
-            {{ isScanning ? '扫描中...' : '开始扫描' }}
-          </button>
-          <button class="secondary" :disabled="isScanning" @click="closeScanDialog">取消</button>
-        </div>
-      </section>
-    </div>
+    <el-dialog v-model="showScanDialog" title="上传/扫描成交图片" width="560px">
+      <el-form label-position="top">
+        <el-form-item label="图片日期">
+          <el-date-picker
+            v-model="scanDate"
+            type="date"
+            value-format="YYYY-MM-DD"
+            placeholder="选择图片对应日期"
+            style="width: 100%"
+          />
+        </el-form-item>
+        <el-form-item label="成交图片">
+          <el-upload
+            drag
+            multiple
+            accept=".jpg,.jpeg,.png,.bmp,.webp"
+            :auto-upload="false"
+            :file-list="imageUploadFileList"
+            :on-change="handleImageFileChange"
+            :on-remove="handleImageFileRemove"
+          >
+            <div class="upload-drop-text">拖拽图片到这里，或点击选择图片</div>
+          </el-upload>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button :disabled="isScanning || isUploadingImages" @click="showScanDialog = false">取消</el-button>
+        <el-button :loading="isUploadingImages" :disabled="!scanDate" @click="uploadImages(false)">仅上传</el-button>
+        <el-button :loading="isScanning" :disabled="!scanDate || isUploadingImages" @click="scanImages">扫描已有图片</el-button>
+        <el-button
+          type="primary"
+          :loading="isUploadingImages"
+          :disabled="!scanDate || !imageUploadFileList.length || isScanning"
+          @click="uploadImages(true)"
+        >
+          上传并扫描
+        </el-button>
+      </template>
+    </el-dialog>
 
     <el-dialog v-model="showPasswordDialog" title="修改密码" width="420px">
       <el-form label-position="top">

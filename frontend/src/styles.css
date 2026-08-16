@@ -329,6 +329,11 @@ p {
   width: 100%;
 }
 
+.upload-drop-text {
+  color: #475569;
+  font-size: 14px;
+}
+
 .qa-skeleton {
   margin: 14px 0;
 }
