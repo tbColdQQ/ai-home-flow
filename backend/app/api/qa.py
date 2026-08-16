@@ -2,12 +2,13 @@ import json
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
+from starlette.responses import StreamingResponse
 
 from app.api.deps import current_user
 from app.db.session import get_connection
 from app.services.auth_service import CurrentUser
 from app.services.knowledge_service import archive_knowledge_document, create_knowledge_document, list_knowledge_documents
-from app.services.qa_service import answer_question
+from app.services.qa_service import answer_question, answer_question_stream
 
 
 router = APIRouter()
@@ -46,6 +47,55 @@ def ask(body: AskRequest, user: CurrentUser = Depends(current_user)) -> dict:
         conn.commit()
         result["session_id"] = session_id
         return result
+
+
+def _save_chat_message_pair(conn, user: CurrentUser, question: str, result: dict, session_id: int | None) -> int:
+    if session_id is None:
+        cursor = conn.execute(
+            "INSERT INTO chat_sessions(user_id, title) VALUES (?, ?)",
+            (user.id, question[:40]),
+        )
+        session_id = int(cursor.lastrowid)
+    conn.execute(
+        """
+        INSERT INTO chat_messages(session_id, user_id, role, content, result_json)
+        VALUES (?, ?, 'user', ?, ?)
+        """,
+        (session_id, user.id, question, json.dumps(result, ensure_ascii=False)),
+    )
+    conn.execute(
+        """
+        INSERT INTO chat_messages(session_id, user_id, role, content, result_json)
+        VALUES (?, ?, 'assistant', ?, ?)
+        """,
+        (session_id, user.id, result["answer"], json.dumps(result, ensure_ascii=False)),
+    )
+    conn.commit()
+    return session_id
+
+
+@router.post("/ask-stream")
+def ask_stream(body: AskRequest, user: CurrentUser = Depends(current_user)) -> StreamingResponse:
+    def event_stream():
+        with get_connection() as conn:
+            try:
+                for event in answer_question_stream(conn, body.question, user.city):
+                    if event["type"] == "final":
+                        result = event["result"]
+                        result["session_id"] = _save_chat_message_pair(conn, user, body.question, result, body.session_id)
+                        event = {"type": "final", "result": result}
+                    yield json.dumps(event, ensure_ascii=False) + "\n"
+            except Exception as exc:
+                yield json.dumps({"type": "error", "content": str(exc)}, ensure_ascii=False) + "\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="application/x-ndjson",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.post("/knowledge")

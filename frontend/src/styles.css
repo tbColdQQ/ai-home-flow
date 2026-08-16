@@ -333,6 +333,12 @@ p {
   margin: 14px 0;
 }
 
+.qa-status {
+  margin: 12px 0;
+  color: #64748b;
+  font-size: 14px;
+}
+
 .answer {
   min-height: 30px;
   margin: 14px 0;

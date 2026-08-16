@@ -14,6 +14,7 @@ const passwordForm = ref({ old_password: '', new_password: '', confirm_password:
 const isChangingPassword = ref(false)
 const question = ref('本月哪个小区成交最多？')
 const answer = ref('')
+const qaStatus = ref('')
 const isAsking = ref(false)
 const orders = ref([])
 const orderTotal = ref(0)
@@ -188,6 +189,28 @@ async function apiForm(path, formData) {
   const data = await res.json()
   if (!res.ok) throw new Error(data.detail || data.error || '请求失败')
   return data
+}
+
+async function readNdjsonStream(res, onEvent) {
+  const reader = res.body?.getReader()
+  if (!reader) return
+  const decoder = new TextDecoder()
+  let buffer = ''
+  while (true) {
+    const { value, done } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split('\n')
+    buffer = lines.pop() || ''
+    for (const line of lines) {
+      const text = line.trim()
+      if (!text) continue
+      onEvent(JSON.parse(text))
+    }
+  }
+  buffer += decoder.decode()
+  const text = buffer.trim()
+  if (text) onEvent(JSON.parse(text))
 }
 
 async function login() {
@@ -832,28 +855,55 @@ async function uploadExcel(event) {
 }
 
 async function ask() {
-  if (isAsking.value) return
+  const text = question.value.trim()
+  if (!text || isAsking.value) return
   isAsking.value = true
-  answer.value = '正在查询...'
+  answer.value = ''
+  qaStatus.value = '正在连接智能问答...'
   knowledgeSources.value = []
   try {
-    const data = await api('/api/qa/ask', {
+    const res = await fetch(apiUrl('/api/qa/ask-stream'), {
       method: 'POST',
-      body: JSON.stringify({ question: question.value }),
+      headers: authHeaders(),
+      body: JSON.stringify({ question: text }),
     })
-    answer.value = formatAnswer(data.answer)
-    knowledgeSources.value = data.rag_context || []
-    if (data.chart && chartRef.value) {
-      const chart = echarts.getInstanceByDom(chartRef.value) || echarts.init(chartRef.value)
-      chart.setOption({
-        tooltip: {},
-        grid: { left: 42, right: 18, top: 24, bottom: 54 },
-        xAxis: { type: 'category', data: data.chart.x, axisLabel: { interval: 0, rotate: 28 } },
-        yAxis: { type: 'value' },
-        series: [{ type: data.chart.type, data: data.chart.y, itemStyle: { color: '#2563eb' } }],
-      })
+    if (res.status === 401) {
+      logout(false)
+      throw new Error('登录已失效')
     }
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}))
+      throw new Error(data.detail || data.error || '请求失败')
+    }
+    await readNdjsonStream(res, (event) => {
+      if (event.type === 'status') {
+        qaStatus.value = event.content
+      } else if (event.type === 'sources') {
+        knowledgeSources.value = event.content || []
+      } else if (event.type === 'delta') {
+        qaStatus.value = ''
+        answer.value += event.content || ''
+      } else if (event.type === 'final') {
+        const data = event.result || {}
+        qaStatus.value = ''
+        answer.value = formatAnswer(data.answer || answer.value)
+        knowledgeSources.value = data.rag_context || knowledgeSources.value
+        if (data.chart && chartRef.value) {
+          const chart = echarts.getInstanceByDom(chartRef.value) || echarts.init(chartRef.value)
+          chart.setOption({
+            tooltip: {},
+            grid: { left: 42, right: 18, top: 24, bottom: 54 },
+            xAxis: { type: 'category', data: data.chart.x, axisLabel: { interval: 0, rotate: 28 } },
+            yAxis: { type: 'value' },
+            series: [{ type: data.chart.type, data: data.chart.y, itemStyle: { color: '#2563eb' } }],
+          })
+        }
+      } else if (event.type === 'error') {
+        throw new Error(event.content || '请求失败')
+      }
+    })
   } catch (error) {
+    qaStatus.value = ''
     answer.value = error.message
   } finally {
     isAsking.value = false
@@ -1381,8 +1431,9 @@ watch(dutyCalendarDate, (value) => {
               />
               <el-button type="primary" :loading="isAsking" @click="ask">提问</el-button>
             </div>
-            <el-skeleton v-if="isAsking" :rows="4" animated class="qa-skeleton" />
-            <p v-else class="answer">{{ answer }}</p>
+            <p v-if="qaStatus" class="qa-status">{{ qaStatus }}</p>
+            <p v-if="answer" class="answer">{{ answer }}</p>
+            <el-skeleton v-if="isAsking && !answer" :rows="4" animated class="qa-skeleton" />
             <div v-if="knowledgeSources.length" class="knowledge-sources">
               <h3>命中知识</h3>
               <el-tag

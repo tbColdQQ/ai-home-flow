@@ -1,4 +1,5 @@
 import json
+from collections.abc import Iterator
 from typing import Any
 
 from app.core.config import settings
@@ -136,6 +137,22 @@ def call_llm(messages: list[dict[str, str]], json_mode: bool = True) -> str | No
         return None
 
 
+def call_llm_stream(messages: list[dict[str, str]], json_mode: bool = False) -> Iterator[str]:
+    if not llm_is_configured():
+        return
+
+    try:
+        model = _build_chat_model()
+        if json_mode and hasattr(model, "bind"):
+            model = model.bind(response_format={"type": "json_object"})
+        for chunk in model.stream([(message["role"], message["content"]) for message in messages]):
+            content = _message_content(chunk)
+            if content:
+                yield content
+    except Exception:
+        return
+
+
 def generate_sql_with_llm(question: str, rag_context: list[dict] | None = None) -> dict[str, Any] | None:
     content = call_llm(
         [
@@ -179,3 +196,29 @@ def summarize_answer_with_llm(question: str, sql: str, rows: list[dict], rag_con
         json_mode=False,
     )
     return content.strip() if content else None
+
+
+def summarize_answer_with_llm_stream(
+    question: str,
+    sql: str,
+    rows: list[dict],
+    rag_context: list[dict] | None = None,
+) -> Iterator[str]:
+    yield from call_llm_stream(
+        [
+            {"role": "system", "content": ANSWER_PROMPT},
+            {
+                "role": "user",
+                "content": json.dumps(
+                    {
+                        "question": question,
+                        "sql": sql,
+                        "rows": rows[:50],
+                        "rag_context": rag_context or [],
+                    },
+                    ensure_ascii=False,
+                ),
+            },
+        ],
+        json_mode=False,
+    )

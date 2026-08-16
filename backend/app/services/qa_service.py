@@ -7,6 +7,7 @@ from app.services.llm_service import (
     generate_sql_with_llm,
     llm_config_summary,
     llm_is_configured,
+    summarize_answer_with_llm_stream,
     summarize_answer_with_llm,
 )
 from app.services.rag_service import retrieve_context
@@ -215,3 +216,49 @@ def answer_question(conn, question: str, city: str) -> dict:
         "chart": _chart_from_payload(sql_payload, rows),
         "rag_context": rag_context,
     }
+
+
+def answer_question_stream(conn, question: str, city: str):
+    clean_question = question.strip()
+
+    yield {"type": "status", "content": "正在检索知识库..."}
+    rag_context = retrieve_context(conn, clean_question, city)
+    if rag_context:
+        yield {"type": "sources", "content": rag_context}
+
+    yield {"type": "status", "content": "正在理解问题并生成查询..."}
+    sql_payload, fallback_reason = _choose_sql_payload(clean_question, rag_context)
+
+    yield {"type": "status", "content": "正在查询成交数据..."}
+    try:
+        rows = _execute_sql(conn, sql_payload, city)
+    except Exception:
+        fallback_reason = "llm_sql_execution_failed" if sql_payload["source"] == "llm" else "fallback_sql_execution_failed"
+        sql_payload = _fallback_sql(clean_question)
+        rows = _execute_sql(conn, sql_payload, city)
+
+    yield {"type": "status", "content": "正在生成回答..."}
+    answer_parts: list[str] = []
+    for chunk in summarize_answer_with_llm_stream(clean_question, sql_payload["sql"], rows, rag_context):
+        answer_parts.append(chunk)
+        yield {"type": "delta", "content": chunk}
+
+    answer = "".join(answer_parts).strip()
+    answer_source = "llm" if answer else "fallback"
+    if not answer:
+        answer = _fallback_answer(clean_question, rows, rag_context)
+        yield {"type": "delta", "content": answer}
+
+    result = {
+        "answer": answer,
+        "answer_source": answer_source,
+        "data": rows,
+        "sql": sql_payload["sql"],
+        "sql_params": sql_payload["params"],
+        "sql_source": sql_payload["source"],
+        "llm_fallback_reason": fallback_reason,
+        "llm_config": llm_config_summary(),
+        "chart": _chart_from_payload(sql_payload, rows),
+        "rag_context": rag_context,
+    }
+    yield {"type": "final", "result": result}

@@ -77,6 +77,28 @@ async function apiForm(path, formData) {
   return data
 }
 
+async function readNdjsonStream(res, onEvent) {
+  const reader = res.body?.getReader()
+  if (!reader) return
+  const decoder = new TextDecoder()
+  let buffer = ''
+  while (true) {
+    const { value, done } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split('\n')
+    buffer = lines.pop() || ''
+    for (const line of lines) {
+      const text = line.trim()
+      if (!text) continue
+      onEvent(JSON.parse(text))
+    }
+  }
+  buffer += decoder.decode()
+  const text = buffer.trim()
+  if (text) onEvent(JSON.parse(text))
+}
+
 async function login() {
   if (isLoggingIn.value) return
   isLoggingIn.value = true
@@ -125,17 +147,45 @@ async function ask() {
   if (!text || isAsking.value) return
   isAsking.value = true
   chatMessages.value.push({ role: 'user', content: text })
+  const assistantMessage = { role: 'assistant', content: '正在连接智能问答...' }
+  chatMessages.value.push(assistantMessage)
   question.value = ''
   message.value = ''
   await scrollChatToBottom()
   try {
-    const data = await api('/api/qa/ask', {
+    const res = await fetch(apiUrl('/api/qa/ask-stream'), {
       method: 'POST',
+      headers: authHeaders(),
       body: JSON.stringify({ question: text }),
     })
-    chatMessages.value.push({ role: 'assistant', content: formatAnswer(data.answer) })
+    if (res.status === 401) {
+      logout(false)
+      throw new Error('登录已失效')
+    }
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}))
+      throw new Error(data.detail || data.error || '请求失败')
+    }
+    let hasDelta = false
+    await readNdjsonStream(res, (event) => {
+      if (event.type === 'status' && !hasDelta) {
+        assistantMessage.content = event.content
+      } else if (event.type === 'delta') {
+        if (!hasDelta) {
+          assistantMessage.content = ''
+          hasDelta = true
+        }
+        assistantMessage.content += event.content || ''
+      } else if (event.type === 'final') {
+        const data = event.result || {}
+        assistantMessage.content = formatAnswer(data.answer || assistantMessage.content)
+      } else if (event.type === 'error') {
+        throw new Error(event.content || '请求失败')
+      }
+      scrollChatToBottom()
+    })
   } catch (error) {
-    chatMessages.value.push({ role: 'assistant', content: error.message })
+    chatMessages.value[chatMessages.value.length - 1].content = error.message
   } finally {
     isAsking.value = false
     await scrollChatToBottom()
@@ -306,10 +356,6 @@ onMounted(async () => {
         >
           <div class="avatar">{{ item.role === 'user' ? '我' : 'AI' }}</div>
           <p>{{ item.content }}</p>
-        </article>
-        <article v-if="isAsking" class="chat-message assistant">
-          <div class="avatar">AI</div>
-          <p>正在思考...</p>
         </article>
       </div>
       <div class="chat-composer">
