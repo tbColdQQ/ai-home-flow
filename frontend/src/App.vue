@@ -377,16 +377,6 @@ async function resetOrderFilters() {
   await loadOrders()
 }
 
-async function changeOrderPage(nextPage) {
-  orderPage.value = Math.min(Math.max(nextPage, 1), totalPages.value)
-  await loadOrders()
-}
-
-async function changeOrderPageSize() {
-  orderPage.value = 1
-  await loadOrders()
-}
-
 async function applyLeaseFilters() {
   leasePage.value = 1
   await loadLeases()
@@ -483,19 +473,14 @@ async function saveDutyAssignment() {
   }
 }
 
-async function changeLeasePage(nextPage) {
-  leasePage.value = Math.min(Math.max(nextPage, 1), leaseTotalPages.value)
-  await loadLeases()
-}
-
-async function changeLeasePageSize() {
-  leasePage.value = 1
-  await loadLeases()
-}
-
-async function changeOrderPagination(page, pageSize) {
+async function changeOrderCurrentPage(page) {
   orderPage.value = page
+  await loadOrders()
+}
+
+async function changeOrderPageSizeElement(pageSize) {
   orderPageSize.value = pageSize
+  orderPage.value = 1
   await loadOrders()
 }
 
@@ -506,9 +491,14 @@ async function handleOrderSort({ prop, order }) {
   await loadOrders()
 }
 
-async function changeLeasePagination(page, pageSize) {
+async function changeLeaseCurrentPage(page) {
   leasePage.value = page
+  await loadLeases()
+}
+
+async function changeLeasePageSizeElement(pageSize) {
   leasePageSize.value = pageSize
+  leasePage.value = 1
   await loadLeases()
 }
 
@@ -1401,7 +1391,8 @@ watch(dutyCalendarDate, (value) => {
           :current-page="orderPage"
           :page-size="orderPageSize"
           :page-sizes="[20, 50, 100]"
-          @change="changeOrderPagination"
+          @current-change="changeOrderCurrentPage"
+          @size-change="changeOrderPageSizeElement"
         />
       </section>
 
@@ -1457,7 +1448,8 @@ watch(dutyCalendarDate, (value) => {
           :current-page="leasePage"
           :page-size="leasePageSize"
           :page-sizes="[20, 50, 100]"
-          @change="changeLeasePagination"
+          @current-change="changeLeaseCurrentPage"
+          @size-change="changeLeasePageSizeElement"
         />
       </section>
 
