@@ -443,7 +443,7 @@ def _confirm_parsed_image(
 def scan_images(root: Path | None = None, city: str | None = None, business_date: str | None = None) -> dict:
     root = root or settings.image_root
     root.mkdir(parents=True, exist_ok=True)
-    result = {"scanned": 0, "confirmed": 0, "merged": 0, "pending": 0, "skipped": 0, "failed": 0}
+    result = {"scanned": 0, "confirmed": 0, "merged": 0, "pending": 0, "skipped": 0, "failed": 0, "details": []}
     scan_root = root
     fixed_city = city
     fixed_business_date = business_date
@@ -451,6 +451,14 @@ def scan_images(root: Path | None = None, city: str | None = None, business_date
         scan_root = root / city / business_date
         result["target_dir"] = str(scan_root)
         if not scan_root.exists():
+            result["details"].append(
+                {
+                    "file_name": "",
+                    "status": "missing_dir",
+                    "message": "扫描目录不存在",
+                    "target_dir": str(scan_root),
+                }
+            )
             return result
 
     for image_path in scan_root.rglob("*"):
@@ -469,23 +477,48 @@ def scan_images(root: Path | None = None, city: str | None = None, business_date
                 _insert_source_image(conn, "", "", image_path, digest, "", "failed", error_message="图片目录必须为：城市/日期/图片")
                 conn.commit()
             result["failed"] += 1
+            result["details"].append(
+                {
+                    "file_name": image_path.name,
+                    "status": "failed",
+                    "message": "图片目录必须为：城市/日期/图片",
+                }
+            )
             continue
         with get_connection() as conn:
             exists = conn.execute(
-                "SELECT id, status, related_order_id FROM source_images WHERE file_hash = ?",
+                "SELECT id, status, related_order_id, error_message FROM source_images WHERE file_hash = ?",
                 (digest,),
             ).fetchone()
         existing_source_id = int(exists["id"]) if exists else None
         if exists and (exists["status"] in {"confirmed", "ignored"} or exists["related_order_id"]):
             result["skipped"] += 1
+            result["details"].append(
+                {
+                    "file_name": image_path.name,
+                    "status": "skipped",
+                    "message": "图片已处理过，已跳过",
+                    "source_id": existing_source_id,
+                    "order_id": exists["related_order_id"],
+                    "source_status": exists["status"],
+                }
+            )
             continue
 
         ocr_text, error = extract_text(image_path)
         if error:
             with get_connection() as conn:
-                _handle_pending_source(conn, existing_source_id, city, business_date, image_path, digest, ocr_text, None, None, error, None)
+                source_id = _handle_pending_source(conn, existing_source_id, city, business_date, image_path, digest, ocr_text, None, None, error, None)
                 conn.commit()
             result["pending"] += 1
+            result["details"].append(
+                {
+                    "file_name": image_path.name,
+                    "status": "pending",
+                    "message": error,
+                    "source_id": source_id,
+                }
+            )
             continue
 
         parsed = parse_order_text(ocr_text, city, business_date)
@@ -496,15 +529,42 @@ def scan_images(root: Path | None = None, city: str | None = None, business_date
         with get_connection() as conn:
             if parsed.needs_review:
                 reason = ";".join(parsed.reasons)
-                _handle_pending_source(conn, existing_source_id, city, business_date, image_path, digest, ocr_text, parsed_json, confidence_json, reason, task_store)
+                source_id = _handle_pending_source(conn, existing_source_id, city, business_date, image_path, digest, ocr_text, parsed_json, confidence_json, reason, task_store)
                 conn.commit()
                 result["pending"] += 1
+                result["details"].append(
+                    {
+                        "file_name": image_path.name,
+                        "status": "pending",
+                        "message": reason,
+                        "source_id": source_id,
+                        "parsed": parsed.data,
+                    }
+                )
             else:
                 before = _find_matching_order(conn, parsed.data)
-                _confirm_parsed_image(conn, existing_source_id, city, business_date, image_path, digest, ocr_text, parsed.data, parsed_json, confidence_json)
+                order_id = _confirm_parsed_image(conn, existing_source_id, city, business_date, image_path, digest, ocr_text, parsed.data, parsed_json, confidence_json)
                 conn.commit()
                 if before:
                     result["merged"] += 1
+                    result["details"].append(
+                        {
+                            "file_name": image_path.name,
+                            "status": "merged",
+                            "message": "已匹配到现有成交记录并合并",
+                            "order_id": order_id,
+                            "parsed": parsed.data,
+                        }
+                    )
                 else:
                     result["confirmed"] += 1
+                    result["details"].append(
+                        {
+                            "file_name": image_path.name,
+                            "status": "confirmed",
+                            "message": "已新增成交记录",
+                            "order_id": order_id,
+                            "parsed": parsed.data,
+                        }
+                    )
     return result

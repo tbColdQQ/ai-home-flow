@@ -85,6 +85,7 @@ const scanDate = ref(new Date().toISOString().slice(0, 10))
 const isScanning = ref(false)
 const isUploadingImages = ref(false)
 const imageUploadFileList = ref([])
+const scanDetails = ref([])
 
 const isLoggedIn = computed(() => Boolean(token.value && user.value))
 const isAdmin = computed(() => user.value?.roles?.includes('admin'))
@@ -801,6 +802,7 @@ async function deleteOrder(item) {
 }
 
 function openScanDialog() {
+  scanDetails.value = []
   showScanDialog.value = true
 }
 
@@ -824,8 +826,8 @@ async function scanImages() {
       method: 'POST',
       body: JSON.stringify({ business_date: scanDate.value }),
     })
+    scanDetails.value = data.details || []
     message.value = `扫描完成：日期 ${scanDate.value}，已扫描 ${data.scanned} 张，入库 ${data.confirmed} 条，合并 ${data.merged ?? 0} 条，待确认 ${data.pending} 条，跳过 ${data.skipped} 张，失败 ${data.failed} 张`
-    showScanDialog.value = false
     await loadAll()
   } catch (error) {
     message.value = error.message
@@ -851,10 +853,11 @@ async function uploadImages(scanAfterUpload = false) {
     imageUploadFileList.value = []
     if (data.scan) {
       const scan = data.scan
+      scanDetails.value = scan.details || []
       message.value = `上传 ${data.uploaded} 张并扫描完成：入库 ${scan.confirmed} 条，合并 ${scan.merged ?? 0} 条，待确认 ${scan.pending} 条，跳过 ${scan.skipped} 张，失败 ${scan.failed} 张`
-      showScanDialog.value = false
       await loadAll()
     } else {
+      scanDetails.value = []
       message.value = `上传完成：${data.uploaded} 张图片已保存到 ${data.business_date} 目录`
     }
   } catch (error) {
@@ -1769,6 +1772,23 @@ watch(dutyCalendarDate, (value) => {
           </el-upload>
         </el-form-item>
       </el-form>
+      <el-table v-if="scanDetails.length" :data="scanDetails" border stripe size="small" class="scan-detail-table">
+        <el-table-column prop="file_name" label="图片" min-width="160" />
+        <el-table-column label="状态" width="90">
+          <template #default="{ row }">
+            <el-tag
+              :type="row.status === 'confirmed' ? 'success' : row.status === 'pending' ? 'warning' : row.status === 'failed' ? 'danger' : 'info'"
+              effect="plain"
+            >
+              {{ row.status }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="message" label="处理结果" min-width="180" />
+        <el-table-column label="成交ID" width="90">
+          <template #default="{ row }">{{ row.order_id || '-' }}</template>
+        </el-table-column>
+      </el-table>
       <template #footer>
         <el-button :disabled="isScanning || isUploadingImages" @click="showScanDialog = false">取消</el-button>
         <el-button :loading="isUploadingImages" :disabled="!scanDate" @click="uploadImages(false)">仅上传</el-button>

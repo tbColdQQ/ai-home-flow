@@ -334,6 +334,10 @@ p {
   font-size: 14px;
 }
 
+.scan-detail-table {
+  margin-top: 12px;
+}
+
 .qa-skeleton {
   margin: 14px 0;
 }
