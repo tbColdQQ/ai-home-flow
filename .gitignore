@@ -10,5 +10,6 @@ dist-h5/
 
 data/storage/*.db
 data/storage/*.db-*
+data/backups/
 data/incoming/
 tmp/

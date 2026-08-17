@@ -116,6 +116,34 @@ dnf install -y tesseract tesseract-langpack-chi_sim
 pip install pytesseract pillow
 ```
 
+## 数据库备份
+
+服务器上可以安装每周自动备份 SQLite 数据库的任务：
+
+```bash
+cd /root/projects/ai-home-flow
+chmod +x scripts/weekly-db-backup.sh
+scripts/weekly-db-backup.sh install-cron
+```
+
+默认执行时间是每周一 01:00，备份目录是：
+
+```text
+data/backups/db/
+```
+
+手动立即备份：
+
+```bash
+scripts/weekly-db-backup.sh run
+```
+
+查看最近备份：
+
+```bash
+scripts/weekly-db-backup.sh list
+```
+
 ## 大模型配置
 
 默认不开启大模型，问答会使用本地规则解析。开启后，大模型只负责解析查询意图，后端仍然负责 SQL 生成、参数绑定和城市权限过滤。
