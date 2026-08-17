@@ -230,6 +230,22 @@ def _find_matching_order(conn, data: dict) -> dict | None:
     return dict(row) if row else None
 
 
+def _source_has_active_order(conn, source_row) -> bool:
+    if not source_row or not source_row["related_order_id"]:
+        return False
+    order = conn.execute(
+        """
+        SELECT ID
+        FROM orders
+        WHERE ID = ?
+          AND COALESCE(status, 'normal') != 'cancel'
+        LIMIT 1
+        """,
+        (source_row["related_order_id"],),
+    ).fetchone()
+    return order is not None
+
+
 def _merge_order_payload(existing: dict, data: dict, source_id: int, image_path: Path, parsed_json: str) -> dict:
     payload: dict[str, Any] = {}
     for field in MERGE_ORDER_FIELDS:
@@ -490,14 +506,15 @@ def scan_images(root: Path | None = None, city: str | None = None, business_date
                 "SELECT id, status, related_order_id, error_message FROM source_images WHERE file_hash = ?",
                 (digest,),
             ).fetchone()
+            can_skip_existing = bool(exists and exists["status"] in {"confirmed", "ignored"} and _source_has_active_order(conn, exists))
         existing_source_id = int(exists["id"]) if exists else None
-        if exists and (exists["status"] in {"confirmed", "ignored"} or exists["related_order_id"]):
+        if can_skip_existing:
             result["skipped"] += 1
             result["details"].append(
                 {
                     "file_name": image_path.name,
                     "status": "skipped",
-                    "message": "图片已处理过，已跳过",
+                    "message": "图片已处理过，且成交记录仍有效，已跳过",
                     "source_id": existing_source_id,
                     "order_id": exists["related_order_id"],
                     "source_status": exists["status"],
