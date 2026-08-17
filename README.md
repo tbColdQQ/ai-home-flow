@@ -93,6 +93,29 @@ example.jpg
 example.txt
 ```
 
+## OCR 检查
+
+图片扫描默认优先使用 RapidOCR。服务器部署后如果扫描提示“未安装 RapidOCR 组件”，进入后端虚拟环境执行：
+
+```bash
+cd /root/projects/ai-home-flow/backend
+pip install -r requirements.txt
+python scripts/check_ocr.py
+```
+
+OpenCloudOS/CentOS 系服务器如果提示缺少动态库，先安装常见运行库：
+
+```bash
+dnf install -y libgomp mesa-libGL
+```
+
+Tesseract 是备用 OCR，不是必装项。只有需要启用 Tesseract 时再安装：
+
+```bash
+dnf install -y tesseract tesseract-langpack-chi_sim
+pip install pytesseract pillow
+```
+
 ## 大模型配置
 
 默认不开启大模型，问答会使用本地规则解析。开启后，大模型只负责解析查询意图，后端仍然负责 SQL 生成、参数绑定和城市权限过滤。

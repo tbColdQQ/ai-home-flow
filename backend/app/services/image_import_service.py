@@ -53,8 +53,8 @@ def _extract_text_with_rapidocr(path: Path) -> tuple[str, str | None]:
     global _rapid_ocr
     try:
         from rapidocr import RapidOCR  # type: ignore
-    except Exception:
-        return "", "未安装 RapidOCR 组件"
+    except Exception as exc:
+        return "", f"未安装 RapidOCR 组件或依赖加载失败：{exc}"
 
     try:
         if _rapid_ocr is None:
@@ -91,8 +91,8 @@ def _extract_text_with_tesseract(path: Path) -> tuple[str, str | None]:
     try:
         import pytesseract  # type: ignore
         from PIL import Image  # type: ignore
-    except Exception:
-        return "", "未安装 Tesseract OCR Python 组件"
+    except Exception as exc:
+        return "", f"未安装 Tesseract OCR Python 组件或依赖加载失败：{exc}"
 
     try:
         text = pytesseract.image_to_string(Image.open(path), lang="chi_sim+eng").strip()
