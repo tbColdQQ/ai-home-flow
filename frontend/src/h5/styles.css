@@ -144,8 +144,6 @@ textarea {
 }
 
 .chat-message.user p {
-  grid-column: 1;
-  grid-row: 1;
   justify-self: end;
   color: #fff;
   background: #2563eb;
@@ -161,6 +159,12 @@ textarea {
   background: #0f172a;
   font-size: 12px;
   font-weight: 700;
+}
+
+.message-body {
+  display: grid;
+  gap: 8px;
+  max-width: min(100%, 620px);
 }
 
 .chat-message p {
@@ -182,6 +186,41 @@ textarea {
   border-top-right-radius: 4px;
 }
 
+.chat-message.user .message-body {
+  grid-column: 1;
+  grid-row: 1;
+  justify-self: end;
+}
+
+.message-detail {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid #dbeafe;
+  border-radius: 8px;
+  color: #334155;
+  background: #eff6ff;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.message-detail strong {
+  color: #1e3a8a;
+}
+
+.message-chart {
+  width: min(100%, 620px);
+  height: 240px;
+  border: 1px solid #dbeafe;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.timing-detail {
+  border-color: #e5e7eb;
+  background: #f8fafc;
+}
+
 .chat-composer {
   position: fixed;
   left: 0;
@@ -189,12 +228,16 @@ textarea {
   bottom: 64px;
   z-index: 9;
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: 40px 1fr auto;
   gap: 8px;
   padding: 10px 12px;
   border-top: 1px solid #e2e8f0;
   background: rgba(255, 255, 255, 0.96);
   backdrop-filter: blur(10px);
+}
+
+.hidden-file-input {
+  display: none;
 }
 
 .upload-card h2,

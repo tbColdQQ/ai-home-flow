@@ -26,6 +26,8 @@ class Settings:
         self.db_path = Path(os.getenv("HOME_FLOW_DB_PATH", ROOT_DIR / "data" / "storage" / "home_flow.db"))
         self.image_root = Path(os.getenv("HOME_FLOW_IMAGE_ROOT", ROOT_DIR / "data" / "incoming"))
         self.knowledge_root = Path(os.getenv("HOME_FLOW_KNOWLEDGE_ROOT", ROOT_DIR / "data" / "knowledge"))
+        self.chroma_root = Path(os.getenv("HOME_FLOW_CHROMA_ROOT", ROOT_DIR / "data" / "chroma"))
+        self.chroma_collection = os.getenv("HOME_FLOW_CHROMA_COLLECTION", "knowledge_chunks")
         self.default_city = os.getenv("HOME_FLOW_DEFAULT_CITY", "\u5b81\u6ce2\u5e02")
         self.ocr_provider = os.getenv("HOME_FLOW_OCR_PROVIDER", "rapidocr").lower()
         self.ocr_min_score = float(os.getenv("HOME_FLOW_OCR_MIN_SCORE", "0.45"))

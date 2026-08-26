@@ -40,6 +40,78 @@ Rules:
 - Keep result rows at or below 50 unless the user explicitly asks for more.
 """.strip()
 
+ROUTER_PROMPT = """
+You are the router agent for a Chinese real-estate internal system.
+Return JSON only.
+
+Classify the user's question:
+- deal_query: query transaction/deal/order data, statistics, rankings, prices, areas, stores, agents.
+- knowledge_query: ask about communities, policies, rules, processes, documents, school district, facilities.
+- mixed_query: requires both transaction data and knowledge documents.
+- clarification: missing enough information and cannot infer a useful route.
+- unsupported: not related to this system.
+
+Output:
+{
+  "intent": "deal_query|knowledge_query|mixed_query|clarification|unsupported",
+  "confidence": 0.0,
+  "entities": {
+    "city": null,
+    "community_name_raw": null,
+    "community_name": null,
+    "topic": null,
+    "date_range": null
+  },
+  "reason": "short Chinese reason",
+  "question": "optional clarification question"
+}
+
+If the user mentions a community with a typo or short name, infer a likely corrected community
+name from the user's wording only. If uncertain, keep community_name null and put the original
+text in community_name_raw.
+""".strip()
+
+DEAL_QUERY_PROMPT = """
+You extract structured filters for querying transaction data.
+Return JSON only. Do not return SQL.
+
+Available fields:
+- date_range: {"start": "YYYY-MM-DD", "end": "YYYY-MM-DD"} where end is inclusive.
+- city, area, street, residential, store, agent, maintainor.
+- price_range: {"min": number|null, "max": number|null}; price is yuan.
+- acreage_range: {"min": number|null, "max": number|null}; acreage is sqm.
+- metrics: one or more of count,total_price,avg_price,avg_unit_price,deal_list.
+- group_by: null or one of residential,store,agent,maintainor,area,signing_month,acreage_bucket.
+- sort: {"field": "signing_date|price|acreage|count|total_price|avg_price|avg_unit_price|bucket_order", "direction": "asc|desc"}.
+- limit: integer, default 50, max 100.
+
+For Chinese relative dates, use current_date from input.
+If the user asks for rankings, include group_by and sort by count desc unless another metric is requested.
+If the user asks for details/list, include deal_list.
+If the user asks for "各个面积段", "面积段", or area distribution, set group_by to acreage_bucket and include metrics count,avg_price,avg_unit_price.
+If the user asks for a concrete area range like "90-100平米", set acreage_range to {"min": 90, "max": 100} and include metrics count,avg_price,avg_unit_price.
+Output:
+{
+  "date_range": null,
+  "city": null,
+  "area": null,
+  "street": null,
+  "residential": null,
+  "store": null,
+  "agent": null,
+  "maintainor": null,
+  "price_range": null,
+  "acreage_range": null,
+  "metrics": ["count"],
+  "group_by": null,
+  "sort": null,
+  "limit": 50,
+  "need_clarification": false,
+  "missing_fields": [],
+  "clarification_question": null
+}
+""".strip()
+
 
 ANSWER_PROMPT = """
 You are home-flow's Chinese business analyst.
@@ -164,6 +236,40 @@ def generate_sql_with_llm(question: str, rag_context: list[dict] | None = None) 
                     ensure_ascii=False,
                 ),
             },
+        ],
+        json_mode=True,
+    )
+    if not content:
+        return None
+    try:
+        payload = json.loads(content)
+    except json.JSONDecodeError:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def route_question_with_llm(question: str, mode: str = "auto") -> dict[str, Any] | None:
+    content = call_llm(
+        [
+            {"role": "system", "content": ROUTER_PROMPT},
+            {"role": "user", "content": json.dumps({"question": question, "mode": mode}, ensure_ascii=False)},
+        ],
+        json_mode=True,
+    )
+    if not content:
+        return None
+    try:
+        payload = json.loads(content)
+    except json.JSONDecodeError:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def extract_deal_query_with_llm(question: str, current_date: str) -> dict[str, Any] | None:
+    content = call_llm(
+        [
+            {"role": "system", "content": DEAL_QUERY_PROMPT},
+            {"role": "user", "content": json.dumps({"question": question, "current_date": current_date}, ensure_ascii=False)},
         ],
         json_mode=True,
     )

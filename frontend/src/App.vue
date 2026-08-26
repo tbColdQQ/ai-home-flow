@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import * as echarts from 'echarts'
 import { ElMessageBox } from 'element-plus'
 
@@ -15,6 +15,15 @@ const isChangingPassword = ref(false)
 const question = ref('本月哪个小区成交最多？')
 const answer = ref('')
 const qaStatus = ref('')
+const qaMode = ref('auto')
+const qaMessages = ref([])
+const qaConversationId = ref(null)
+const qaDealQuery = ref(null)
+const qaDealResult = ref(null)
+const qaRouter = ref(null)
+const qaScrollRef = ref(null)
+const qaChartEls = new Map()
+const qaChartInstances = new Map()
 const isAsking = ref(false)
 const orders = ref([])
 const orderTotal = ref(0)
@@ -76,6 +85,7 @@ const knowledgeForm = ref({
   community_name: '',
   knowledge_type: '楼盘信息',
   content: '',
+  source_url: '',
 })
 const isUploadingKnowledge = ref(false)
 const importing = ref(false)
@@ -113,6 +123,7 @@ const menus = computed(() => [
   { key: 'orders', label: '成交数据' },
   ...(canManageLeases.value ? [{ key: 'leases', label: '租赁房源' }] : []),
   { key: 'qa', label: '智能问答' },
+  ...(isAdmin.value ? [{ key: 'knowledge', label: '知识库管理' }] : []),
   ...(canManageUsers.value ? [{ key: 'admin', label: isAdmin.value ? '权限管理' : '用户管理' }] : []),
 ])
 
@@ -894,11 +905,19 @@ async function ask() {
   answer.value = ''
   qaStatus.value = '正在连接智能问答...'
   knowledgeSources.value = []
+  qaDealQuery.value = null
+  qaDealResult.value = null
+  qaRouter.value = null
+  qaMessages.value.push({ role: 'user', content: text })
+  const assistantMessage = { role: 'assistant', content: '', status: '正在连接智能问答...', intent: '', sources: [], dealQuery: null, dealResult: null, chart: null, timing: [] }
+  qaMessages.value.push(assistantMessage)
+  question.value = ''
+  await scrollQaToBottom()
   try {
     const res = await fetch(apiUrl('/api/qa/ask-stream'), {
       method: 'POST',
       headers: authHeaders(),
-      body: JSON.stringify({ question: text }),
+      body: JSON.stringify({ question: text, session_id: qaConversationId.value, mode: qaMode.value }),
     })
     if (res.status === 401) {
       logout(false)
@@ -911,36 +930,133 @@ async function ask() {
     await readNdjsonStream(res, (event) => {
       if (event.type === 'status') {
         qaStatus.value = event.content
+        assistantMessage.status = event.content
+      } else if (event.type === 'timing') {
+        assistantMessage.timing = [...(assistantMessage.timing || []), event]
+      } else if (event.type === 'router') {
+        qaRouter.value = event.content || null
+        assistantMessage.intent = event.content?.intent || ''
       } else if (event.type === 'sources') {
         knowledgeSources.value = event.content || []
+        assistantMessage.sources = event.content || []
+      } else if (event.type === 'deal_query') {
+        qaDealQuery.value = event.content || null
+        assistantMessage.dealQuery = event.content || null
+      } else if (event.type === 'deal_result') {
+        qaDealResult.value = event.content || null
+        assistantMessage.dealResult = event.content || null
       } else if (event.type === 'delta') {
         qaStatus.value = ''
+        assistantMessage.status = ''
         answer.value += event.content || ''
+        assistantMessage.content += event.content || ''
       } else if (event.type === 'final') {
         const data = event.result || {}
         qaStatus.value = ''
+        assistantMessage.status = ''
         answer.value = formatAnswer(data.answer || answer.value)
+        assistantMessage.content = formatAnswer(data.answer || assistantMessage.content)
+        assistantMessage.intent = data.intent || assistantMessage.intent
+        assistantMessage.sources = data.rag_context || assistantMessage.sources
+        assistantMessage.dealQuery = data.deal_query || assistantMessage.dealQuery
+        assistantMessage.dealResult = data.deal_result || assistantMessage.dealResult
+        assistantMessage.chart = data.chart || assistantMessage.chart
+        qaConversationId.value = data.session_id || qaConversationId.value
         knowledgeSources.value = data.rag_context || knowledgeSources.value
-        if (data.chart && chartRef.value) {
-          const chart = echarts.getInstanceByDom(chartRef.value) || echarts.init(chartRef.value)
-          chart.setOption({
-            tooltip: {},
-            grid: { left: 42, right: 18, top: 24, bottom: 54 },
-            xAxis: { type: 'category', data: data.chart.x, axisLabel: { interval: 0, rotate: 28 } },
-            yAxis: { type: 'value' },
-            series: [{ type: data.chart.type, data: data.chart.y, itemStyle: { color: '#2563eb' } }],
-          })
-        }
+        qaDealQuery.value = data.deal_query || qaDealQuery.value
+        qaDealResult.value = data.deal_result || qaDealResult.value
+        renderQaChart(assistantMessage)
       } else if (event.type === 'error') {
         throw new Error(event.content || '请求失败')
       }
+      scrollQaToBottom()
     })
   } catch (error) {
     qaStatus.value = ''
     answer.value = error.message
+    assistantMessage.status = ''
+    assistantMessage.content = error.message
   } finally {
     isAsking.value = false
   }
+}
+
+async function scrollQaToBottom() {
+  await nextTick()
+  const el = qaScrollRef.value
+  if (el) el.scrollTop = el.scrollHeight
+}
+
+function setQaChartRef(el, index) {
+  if (el) {
+    qaChartEls.set(index, el)
+    renderQaChart(qaMessages.value[index])
+    return
+  }
+  const chart = qaChartInstances.get(index)
+  if (chart) chart.dispose()
+  qaChartInstances.delete(index)
+  qaChartEls.delete(index)
+}
+
+async function renderQaChart(messageItem) {
+  if (!messageItem?.chart) return
+  await nextTick()
+  const index = qaMessages.value.indexOf(messageItem)
+  const el = qaChartEls.get(index)
+  if (!el) return
+  const chartData = messageItem.chart
+  const chart = qaChartInstances.get(index) || echarts.init(el)
+  qaChartInstances.set(index, chart)
+  const series = Array.isArray(chartData.series) && chartData.series.length
+    ? chartData.series
+    : [{ name: '数量', type: chartData.type || 'bar', data: chartData.y || [] }]
+  chart.setOption({
+    color: ['#2563eb', '#16a34a', '#f97316'],
+    tooltip: { trigger: 'axis' },
+    legend: { top: 0 },
+    grid: { left: 48, right: 22, top: 44, bottom: 58 },
+    xAxis: { type: 'category', data: chartData.x || [], axisLabel: { interval: 0, rotate: 24 } },
+    yAxis: { type: 'value' },
+    series: series.map((item) => ({
+      name: item.name,
+      type: item.type || chartData.type || 'bar',
+      data: item.data || [],
+      smooth: item.type === 'line',
+      barMaxWidth: 34,
+    })),
+  })
+}
+
+function resizeQaCharts() {
+  qaChartInstances.forEach((chart) => chart.resize())
+}
+
+function resetQaConversation() {
+  qaMessages.value = []
+  qaConversationId.value = null
+  qaStatus.value = ''
+  answer.value = ''
+  knowledgeSources.value = []
+  qaDealQuery.value = null
+  qaDealResult.value = null
+  qaRouter.value = null
+}
+
+function askQuick(text) {
+  question.value = text
+  ask()
+}
+
+function intentLabel(intent) {
+  const labels = {
+    deal_query: '成交数据',
+    knowledge_query: '知识库',
+    mixed_query: '综合查询',
+    clarification: '需要补充',
+    unsupported: '暂不支持',
+  }
+  return labels[intent] || '自动判断'
 }
 
 function handleKnowledgeFileChange(file, files) {
@@ -961,11 +1077,12 @@ async function uploadKnowledge() {
     form.append('knowledge_type', knowledgeForm.value.knowledge_type)
     form.append('community_name', knowledgeForm.value.community_name || '')
     form.append('content', knowledgeForm.value.content || '')
+    form.append('source_url', knowledgeForm.value.source_url || '')
     const rawFile = knowledgeFileList.value[0]?.raw
     if (rawFile) form.append('file', rawFile)
     const result = await apiForm('/api/qa/knowledge', form)
     message.value = `知识已上传：版本 ${result.version}，分块 ${result.chunks}`
-    knowledgeForm.value = { title: '', community_name: '', knowledge_type: '楼盘信息', content: '' }
+    knowledgeForm.value = { title: '', community_name: '', knowledge_type: '楼盘信息', content: '', source_url: '' }
     knowledgeFileList.value = []
     await loadKnowledgeDocuments()
   } catch (error) {
@@ -1177,6 +1294,7 @@ async function deletePermission(item) {
 }
 
 onMounted(async () => {
+  window.addEventListener('resize', resizeQaCharts)
   if (isLoggedIn.value) {
     try {
       await loadAll()
@@ -1184,6 +1302,13 @@ onMounted(async () => {
       message.value = error.message
     }
   }
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', resizeQaCharts)
+  qaChartInstances.forEach((chart) => chart.dispose())
+  qaChartInstances.clear()
+  qaChartEls.clear()
 })
 
 watch(dutyCalendarDate, (value) => {
@@ -1453,100 +1578,159 @@ watch(dutyCalendarDate, (value) => {
         />
       </section>
 
-      <section v-if="activePage === 'qa'" class="panel qa-panel">
-        <div class="qa-layout">
-          <div class="qa-main">
+      <section v-if="activePage === 'qa'" class="qa-workspace">
+        <div class="qa-topbar">
+          <div>
             <h2>智能问答</h2>
-            <div class="qa">
-              <el-input
-                v-model="question"
-                :disabled="isAsking"
-                placeholder="请输入成交数据或楼盘知识相关问题"
-                @keyup.enter="ask"
-              />
-              <el-button type="primary" :loading="isAsking" @click="ask">提问</el-button>
-            </div>
-            <p v-if="qaStatus" class="qa-status">{{ qaStatus }}</p>
-            <p v-if="answer" class="answer">{{ answer }}</p>
-            <el-skeleton v-if="isAsking && !answer" :rows="4" animated class="qa-skeleton" />
-            <div v-if="knowledgeSources.length" class="knowledge-sources">
-              <h3>命中知识</h3>
-              <el-tag
-                v-for="item in knowledgeSources"
-                :key="`${item.id}-${item.title}`"
-                class="knowledge-source"
-                type="info"
-                effect="plain"
-              >
-                {{ item.title }} · v{{ item.version }}
-              </el-tag>
-            </div>
-            <div ref="chartRef" class="chart"></div>
+            <span>{{ user?.city || '当前城市' }} · {{ qaConversationId ? `会话 ${qaConversationId}` : '新会话' }}</span>
           </div>
-
-          <el-form class="knowledge-upload" label-position="top">
-            <h2>上传知识</h2>
-            <el-form-item label="标题">
-              <el-input v-model="knowledgeForm.title" placeholder="例如：公元世家三期楼盘资料" />
-            </el-form-item>
-            <el-form-item label="楼盘">
-              <el-input v-model="knowledgeForm.community_name" placeholder="可选，用于同楼盘新版覆盖旧版" />
-            </el-form-item>
-            <el-form-item label="知识类型">
-              <el-select v-model="knowledgeForm.knowledge_type">
-                <el-option label="楼盘信息" value="楼盘信息" />
-                <el-option label="学区信息" value="学区信息" />
-                <el-option label="交易规则" value="交易规则" />
-                <el-option label="其他" value="其他" />
-              </el-select>
-            </el-form-item>
-            <el-form-item label="文字内容">
-              <el-input
-                v-model="knowledgeForm.content"
-                type="textarea"
-                :rows="6"
-                placeholder="可直接粘贴文字，也可以配合上传 PDF 或图片"
-              />
-            </el-form-item>
-            <el-form-item label="文件">
-              <el-upload
-                v-model:file-list="knowledgeFileList"
-                :auto-upload="false"
-                :limit="1"
-                accept=".pdf,.txt,.md,.jpg,.jpeg,.png,.bmp,.webp"
-                :on-change="handleKnowledgeFileChange"
-                :on-remove="handleKnowledgeFileRemove"
-              >
-                <el-button>选择文件</el-button>
-              </el-upload>
-            </el-form-item>
-            <el-button type="primary" :loading="isUploadingKnowledge" @click="uploadKnowledge">上传到知识库</el-button>
-            <div v-if="isAdmin" class="knowledge-admin">
-              <div class="knowledge-admin-header">
-                <h3>知识管理</h3>
-                <el-button size="small" @click="loadKnowledgeDocuments">刷新</el-button>
-              </div>
-              <el-table :data="knowledgeDocuments" size="small" height="260">
-                <el-table-column prop="title" label="标题" min-width="140" show-overflow-tooltip />
-                <el-table-column prop="knowledge_type" label="类型" width="90" />
-                <el-table-column prop="version" label="版本" width="70" />
-                <el-table-column prop="status" label="状态" width="80" />
-                <el-table-column label="操作" width="80" fixed="right">
-                  <template #default="{ row }">
-                    <el-button
-                      v-if="row.status === 'active'"
-                      size="small"
-                      type="danger"
-                      @click="deleteKnowledgeDocument(row)"
-                    >
-                      归档
-                    </el-button>
-                  </template>
-                </el-table-column>
-              </el-table>
-            </div>
-          </el-form>
+          <el-button size="small" @click="resetQaConversation">新建对话</el-button>
         </div>
+
+        <div ref="qaScrollRef" class="qa-messages">
+          <div v-if="!qaMessages.length" class="qa-empty">
+            <el-button size="small" @click="askQuick('本月哪个小区成交最多？')">本月成交排行</el-button>
+            <el-button size="small" @click="askQuick('公元世家三期最近成交情况')">小区成交情况</el-button>
+            <el-button size="small" @click="askQuick('宁波购房政策有哪些？')">政策资料查询</el-button>
+          </div>
+          <div
+            v-for="(item, index) in qaMessages"
+            :key="index"
+            class="qa-message"
+            :class="item.role === 'user' ? 'qa-message-user' : 'qa-message-assistant'"
+          >
+            <div class="qa-bubble">
+              <div v-if="item.role === 'assistant'" class="qa-bubble-meta">
+                <el-tag size="small" effect="plain">{{ intentLabel(item.intent) }}</el-tag>
+                <span v-if="item.status">{{ item.status }}</span>
+              </div>
+              <p class="qa-content">{{ item.content || (item.status ? '' : '正在生成回答...') }}</p>
+              <div
+                v-if="item.role === 'assistant' && item.chart"
+                :ref="(el) => setQaChartRef(el, index)"
+                class="qa-chart"
+              />
+
+              <el-collapse v-if="item.dealQuery || item.dealResult?.rows?.length || item.sources?.length || item.timing?.length" class="qa-evidence">
+                <el-collapse-item v-if="item.dealQuery" title="成交查询条件" name="deal-query">
+                  <pre>{{ JSON.stringify(item.dealQuery, null, 2) }}</pre>
+                </el-collapse-item>
+                <el-collapse-item v-if="item.dealResult?.rows?.length" title="成交查询结果" name="deal-result">
+                  <el-table :data="item.dealResult.rows" size="small" max-height="260" border>
+                    <el-table-column prop="signing_date" label="日期" width="110" />
+                    <el-table-column prop="residential" label="楼盘" min-width="140" show-overflow-tooltip />
+                    <el-table-column prop="name" label="分组" min-width="120" show-overflow-tooltip />
+                    <el-table-column prop="count" label="套数" width="80" />
+                    <el-table-column prop="price" label="成交价" width="110" />
+                    <el-table-column prop="total_price" label="总额" width="120" />
+                    <el-table-column prop="avg_unit_price" label="均价" width="110" />
+                    <el-table-column prop="agent" label="经纪人" width="100" />
+                    <el-table-column prop="store" label="门店" min-width="120" show-overflow-tooltip />
+                  </el-table>
+                </el-collapse-item>
+                <el-collapse-item v-if="item.sources?.length" title="知识库来源" name="sources">
+                  <div class="source-list">
+                    <div v-for="source in item.sources" :key="`${source.chunk_id}-${source.title}`" class="source-item">
+                      <strong>{{ source.title }}</strong>
+                      <span>{{ source.knowledge_type }} · v{{ source.version }} · 相关度 {{ Number(source.score || 0).toFixed(2) }}</span>
+                      <p>{{ source.summary || source.content }}</p>
+                    </div>
+                  </div>
+                </el-collapse-item>
+                <el-collapse-item v-if="item.timing?.length" title="执行耗时" name="timing">
+                  <el-table :data="item.timing" size="small" border>
+                    <el-table-column prop="step" label="步骤" />
+                    <el-table-column prop="elapsed_ms" label="本步耗时(ms)" width="130" />
+                    <el-table-column prop="total_ms" label="累计耗时(ms)" width="130" />
+                  </el-table>
+                </el-collapse-item>
+              </el-collapse>
+            </div>
+          </div>
+        </div>
+
+        <div class="qa-composer">
+          <el-segmented
+            v-model="qaMode"
+            :options="[
+              { label: '自动', value: 'auto' },
+              { label: '成交数据', value: 'deal' },
+              { label: '知识库', value: 'knowledge' },
+            ]"
+            size="small"
+          />
+          <div class="qa-input-row">
+            <el-input
+              v-model="question"
+              type="textarea"
+              :rows="3"
+              resize="none"
+              :disabled="isAsking"
+              placeholder="请输入成交数据、小区情况或政策相关问题"
+              @keydown.enter.exact.prevent="ask"
+            />
+            <el-button type="primary" :loading="isAsking" @click="ask">发送</el-button>
+          </div>
+        </div>
+      </section>
+
+      <section v-if="activePage === 'knowledge'" class="panel knowledge-page">
+        <div class="panel-header">
+          <h2>知识库管理</h2>
+          <el-button size="small" @click="loadKnowledgeDocuments">刷新</el-button>
+        </div>
+        <el-form class="knowledge-upload" label-position="top">
+          <el-form-item label="标题">
+            <el-input v-model="knowledgeForm.title" placeholder="例如：公元世家三期楼盘资料" />
+          </el-form-item>
+          <el-form-item label="楼盘/小区">
+            <el-input v-model="knowledgeForm.community_name" placeholder="可选，用于同楼盘新版覆盖旧版" />
+          </el-form-item>
+          <el-form-item label="知识类型">
+            <el-select v-model="knowledgeForm.knowledge_type">
+              <el-option label="楼盘信息" value="楼盘信息" />
+              <el-option label="政策制度" value="政策制度" />
+              <el-option label="交易规则" value="交易规则" />
+              <el-option label="学区信息" value="学区信息" />
+              <el-option label="其他" value="其他" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="文字内容">
+            <el-input v-model="knowledgeForm.content" type="textarea" :rows="5" placeholder="可直接粘贴文字，也可以配合上传文件" />
+          </el-form-item>
+          <el-form-item label="网页链接">
+            <el-input v-model="knowledgeForm.source_url" placeholder="https://..." clearable />
+          </el-form-item>
+          <el-form-item label="文件">
+            <el-upload
+              v-model:file-list="knowledgeFileList"
+              :auto-upload="false"
+              :limit="1"
+              accept=".pdf,.docx,.txt,.md,.jpg,.jpeg,.png,.bmp,.webp"
+              :on-change="handleKnowledgeFileChange"
+              :on-remove="handleKnowledgeFileRemove"
+            >
+              <el-button>选择文件</el-button>
+            </el-upload>
+          </el-form-item>
+          <el-button type="primary" :loading="isUploadingKnowledge" @click="uploadKnowledge">上传并索引</el-button>
+        </el-form>
+        <el-table :data="knowledgeDocuments" size="small" border stripe class="knowledge-table">
+          <el-table-column prop="title" label="标题" min-width="180" show-overflow-tooltip />
+          <el-table-column prop="knowledge_type" label="类型" width="100" />
+          <el-table-column prop="community_name" label="小区" min-width="120" show-overflow-tooltip />
+          <el-table-column prop="source_type" label="来源类型" width="90" />
+          <el-table-column prop="source_url" label="网页链接" min-width="180" show-overflow-tooltip />
+          <el-table-column prop="chunk_count" label="切片" width="80" />
+          <el-table-column prop="version" label="版本" width="70" />
+          <el-table-column prop="index_status" label="索引状态" width="100" />
+          <el-table-column prop="create_time" label="上传时间" width="170" />
+          <el-table-column label="操作" width="90" fixed="right">
+            <template #default="{ row }">
+              <el-button v-if="row.status === 'active'" size="small" type="danger" @click="deleteKnowledgeDocument(row)">归档</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
       </section>
 
       <section v-if="activePage === 'tasks'" class="panel">
@@ -1942,3 +2126,204 @@ watch(dutyCalendarDate, (value) => {
     </div>
   </main>
 </template>
+
+<style scoped>
+.qa-workspace {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  height: calc(100vh - 112px);
+  min-height: 620px;
+  background: #f7f8fb;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.qa-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  background: #ffffff;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.qa-topbar h2 {
+  margin: 0 0 4px;
+  font-size: 20px;
+}
+
+.qa-topbar span {
+  color: #6b7280;
+  font-size: 13px;
+}
+
+.qa-messages {
+  overflow-y: auto;
+  padding: 20px;
+}
+
+.qa-empty {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  min-height: 240px;
+}
+
+.qa-message {
+  display: flex;
+  margin-bottom: 16px;
+}
+
+.qa-message-user {
+  justify-content: flex-end;
+}
+
+.qa-message-assistant {
+  justify-content: flex-start;
+}
+
+.qa-bubble {
+  max-width: min(860px, 84%);
+  padding: 14px 16px;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.qa-message-user .qa-bubble {
+  color: #ffffff;
+  background: #2563eb;
+  border-color: #2563eb;
+}
+
+.qa-bubble-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  color: #6b7280;
+  font-size: 13px;
+}
+
+.qa-content {
+  margin: 0;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.qa-chart {
+  width: min(760px, 100%);
+  height: 320px;
+  margin-top: 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.qa-evidence {
+  margin-top: 12px;
+}
+
+.qa-evidence pre {
+  max-height: 260px;
+  margin: 0;
+  padding: 10px;
+  overflow: auto;
+  color: #374151;
+  background: #f3f4f6;
+  border-radius: 6px;
+}
+
+.source-list {
+  display: grid;
+  gap: 10px;
+}
+
+.source-item {
+  padding: 10px;
+  background: #f9fafb;
+  border: 1px solid #edf0f3;
+  border-radius: 6px;
+}
+
+.source-item strong,
+.source-item span {
+  display: block;
+}
+
+.source-item span {
+  margin-top: 2px;
+  color: #6b7280;
+  font-size: 12px;
+}
+
+.source-item p {
+  margin: 8px 0 0;
+  color: #374151;
+  line-height: 1.6;
+}
+
+.qa-composer {
+  padding: 14px 18px 18px;
+  background: #ffffff;
+  border-top: 1px solid #e5e7eb;
+}
+
+.qa-input-row {
+  display: grid;
+  grid-template-columns: 1fr 88px;
+  gap: 10px;
+  align-items: stretch;
+  margin-top: 10px;
+}
+
+.qa-input-row .el-button {
+  height: 100%;
+}
+
+.knowledge-page {
+  display: grid;
+  gap: 16px;
+}
+
+.knowledge-upload {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 16px;
+}
+
+.knowledge-upload .el-form-item:nth-child(4),
+.knowledge-upload .el-form-item:nth-child(5),
+.knowledge-upload .el-form-item:nth-child(6) {
+  grid-column: 1 / -1;
+}
+
+.knowledge-table {
+  width: 100%;
+}
+
+@media (max-width: 760px) {
+  .qa-workspace {
+    height: calc(100vh - 80px);
+    min-height: 520px;
+  }
+
+  .qa-bubble {
+    max-width: 94%;
+  }
+
+  .qa-chart {
+    height: 260px;
+  }
+
+  .qa-input-row,
+  .knowledge-upload {
+    grid-template-columns: 1fr;
+  }
+}
+</style>

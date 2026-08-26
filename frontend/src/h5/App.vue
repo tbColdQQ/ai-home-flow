@@ -1,6 +1,7 @@
 <script setup>
-import { computed, nextTick, onMounted, ref } from 'vue'
-import { ChatDotRound, Collection, User } from '@element-plus/icons-vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import * as echarts from 'echarts'
+import { Camera, ChatDotRound, Collection, User } from '@element-plus/icons-vue'
 import { ElMessageBox } from 'element-plus'
 
 const apiBase = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
@@ -12,10 +13,14 @@ const loginForm = ref({ username: '', password: '' })
 const isLoggingIn = ref(false)
 const question = ref('')
 const chatScrollRef = ref(null)
+const imageInputRef = ref(null)
+const chatChartEls = new Map()
+const chatChartInstances = new Map()
 const chatMessages = ref([
   { role: 'assistant', content: '你好，我可以帮你查询成交数据，也可以回答知识库里的楼盘、学区等信息。' },
 ])
 const isAsking = ref(false)
+const isUploadingQueryImage = ref(false)
 const knowledgeList = ref([])
 const isLoadingKnowledge = ref(false)
 const isUploadingKnowledge = ref(false)
@@ -25,6 +30,7 @@ const knowledgeForm = ref({
   community_name: '',
   knowledge_type: '楼盘信息',
   content: '',
+  source_url: '',
 })
 const passwordForm = ref({ old_password: '', new_password: '', confirm_password: '' })
 const isChangingPassword = ref(false)
@@ -170,6 +176,8 @@ async function ask() {
     await readNdjsonStream(res, (event) => {
       if (event.type === 'status' && !hasDelta) {
         assistantMessage.content = event.content
+      } else if (event.type === 'timing') {
+        assistantMessage.timing = [...(assistantMessage.timing || []), event]
       } else if (event.type === 'delta') {
         if (!hasDelta) {
           assistantMessage.content = ''
@@ -179,6 +187,10 @@ async function ask() {
       } else if (event.type === 'final') {
         const data = event.result || {}
         assistantMessage.content = formatAnswer(data.answer || assistantMessage.content)
+        assistantMessage.sources = data.rag_context || []
+        assistantMessage.dealResult = data.deal_result || null
+        assistantMessage.chart = data.chart || null
+        renderChatChart(assistantMessage)
       } else if (event.type === 'error') {
         throw new Error(event.content || '请求失败')
       }
@@ -192,10 +204,128 @@ async function ask() {
   }
 }
 
+function chooseQueryImage() {
+  if (isAsking.value || isUploadingQueryImage.value) return
+  imageInputRef.value?.click()
+}
+
+async function askWithImage(event) {
+  const file = event.target.files?.[0]
+  event.target.value = ''
+  if (!file || isUploadingQueryImage.value) return
+  isUploadingQueryImage.value = true
+  isAsking.value = true
+  message.value = ''
+  chatMessages.value.push({ role: 'user', content: `上传图片：${file.name}` })
+  const assistantMessage = { role: 'assistant', content: '正在上传图片...', imageQuery: null, dealResult: null, sources: [] }
+  chatMessages.value.push(assistantMessage)
+  await scrollChatToBottom()
+  try {
+    const form = new FormData()
+    form.append('file', file)
+    if (question.value.trim()) form.append('question', question.value.trim())
+    question.value = ''
+    const res = await fetch(apiUrl('/api/qa/ask-image-stream'), {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token.value}` },
+      body: form,
+    })
+    if (res.status === 401) {
+      logout(false)
+      throw new Error('登录已失效')
+    }
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}))
+      throw new Error(data.detail || data.error || '请求失败')
+    }
+    let hasDelta = false
+    await readNdjsonStream(res, (streamEvent) => {
+      if (streamEvent.type === 'status' && !hasDelta) {
+        assistantMessage.content = streamEvent.content
+      } else if (streamEvent.type === 'image_ocr') {
+        assistantMessage.imageQuery = streamEvent.content
+        assistantMessage.content = '图片已识别，正在查询相关信息...'
+      } else if (streamEvent.type === 'deal_result') {
+        assistantMessage.dealResult = streamEvent.content
+      } else if (streamEvent.type === 'sources') {
+        assistantMessage.sources = streamEvent.content || []
+      } else if (streamEvent.type === 'delta') {
+        if (!hasDelta) {
+          assistantMessage.content = ''
+          hasDelta = true
+        }
+        assistantMessage.content += streamEvent.content || ''
+      } else if (streamEvent.type === 'final') {
+        const data = streamEvent.result || {}
+        assistantMessage.content = formatAnswer(data.answer || assistantMessage.content)
+        assistantMessage.imageQuery = data.image_query || assistantMessage.imageQuery
+        assistantMessage.dealResult = data.deal_result || assistantMessage.dealResult
+        assistantMessage.sources = data.rag_context || assistantMessage.sources
+        assistantMessage.chart = data.chart || assistantMessage.chart
+        renderChatChart(assistantMessage)
+      } else if (streamEvent.type === 'error') {
+        throw new Error(streamEvent.content || '请求失败')
+      }
+      scrollChatToBottom()
+    })
+  } catch (error) {
+    assistantMessage.content = error.message
+  } finally {
+    isUploadingQueryImage.value = false
+    isAsking.value = false
+    await scrollChatToBottom()
+  }
+}
+
 async function scrollChatToBottom() {
   await nextTick()
   const el = chatScrollRef.value
   if (el) el.scrollTop = el.scrollHeight
+}
+
+function setChatChartRef(el, index) {
+  if (el) {
+    chatChartEls.set(index, el)
+    renderChatChart(chatMessages.value[index])
+    return
+  }
+  const chart = chatChartInstances.get(index)
+  if (chart) chart.dispose()
+  chatChartInstances.delete(index)
+  chatChartEls.delete(index)
+}
+
+async function renderChatChart(messageItem) {
+  if (!messageItem?.chart) return
+  await nextTick()
+  const index = chatMessages.value.indexOf(messageItem)
+  const el = chatChartEls.get(index)
+  if (!el) return
+  const chartData = messageItem.chart
+  const chart = chatChartInstances.get(index) || echarts.init(el)
+  chatChartInstances.set(index, chart)
+  const series = Array.isArray(chartData.series) && chartData.series.length
+    ? chartData.series
+    : [{ name: '数量', type: chartData.type || 'bar', data: chartData.y || [] }]
+  chart.setOption({
+    color: ['#2563eb', '#16a34a', '#f97316'],
+    tooltip: { trigger: 'axis' },
+    legend: { top: 0, textStyle: { fontSize: 10 } },
+    grid: { left: 40, right: 12, top: 38, bottom: 58 },
+    xAxis: { type: 'category', data: chartData.x || [], axisLabel: { interval: 0, rotate: 35, fontSize: 10 } },
+    yAxis: { type: 'value', axisLabel: { fontSize: 10 } },
+    series: series.map((item) => ({
+      name: item.name,
+      type: item.type || chartData.type || 'bar',
+      data: item.data || [],
+      smooth: item.type === 'line',
+      barMaxWidth: 24,
+    })),
+  })
+}
+
+function resizeChatCharts() {
+  chatChartInstances.forEach((chart) => chart.resize())
 }
 
 async function loadKnowledge() {
@@ -228,10 +358,11 @@ async function uploadKnowledge() {
     form.append('community_name', knowledgeForm.value.community_name || '')
     form.append('knowledge_type', knowledgeForm.value.knowledge_type)
     form.append('content', knowledgeForm.value.content || '')
+    form.append('source_url', knowledgeForm.value.source_url || '')
     const rawFile = uploadFileList.value[0]?.raw
     if (rawFile) form.append('file', rawFile)
     await apiForm('/api/qa/knowledge', form)
-    knowledgeForm.value = { title: '', community_name: '', knowledge_type: '楼盘信息', content: '' }
+    knowledgeForm.value = { title: '', community_name: '', knowledge_type: '楼盘信息', content: '', source_url: '' }
     uploadFileList.value = []
     message.value = '知识已上传'
     await loadKnowledge()
@@ -309,9 +440,17 @@ function switchTab(name) {
 }
 
 onMounted(async () => {
+  window.addEventListener('resize', resizeChatCharts)
   if (isLoggedIn.value) {
     await scrollChatToBottom()
   }
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', resizeChatCharts)
+  chatChartInstances.forEach((chart) => chart.dispose())
+  chatChartInstances.clear()
+  chatChartEls.clear()
 })
 </script>
 
@@ -355,10 +494,44 @@ onMounted(async () => {
           :class="item.role"
         >
           <div class="avatar">{{ item.role === 'user' ? '我' : 'AI' }}</div>
-          <p>{{ item.content }}</p>
+          <div class="message-body">
+            <p>{{ item.content }}</p>
+            <div
+              v-if="item.role === 'assistant' && item.chart"
+              :ref="(el) => setChatChartRef(el, index)"
+              class="message-chart"
+            />
+            <div v-if="item.imageQuery" class="message-detail">
+              <strong>图片识别</strong>
+              <span>小区：{{ item.imageQuery.parsed?.residential || '-' }}</span>
+              <span>面积：{{ item.imageQuery.parsed?.acreage || '-' }}</span>
+              <span>维护人：{{ item.imageQuery.parsed?.maintainor || item.imageQuery.parsed?.CA || '-' }}</span>
+              <span>价格：{{ item.imageQuery.parsed?.price || '-' }}</span>
+            </div>
+            <div v-if="item.dealResult?.rows?.length" class="message-detail">
+              <strong>成交结果 {{ item.dealResult.total }}</strong>
+              <span v-for="row in item.dealResult.rows.slice(0, 3)" :key="row.ID || row.residential">
+                {{ row.signing_date || '-' }} · {{ row.residential || row.name || '-' }} · {{ row.price || row.count || '-' }}
+              </span>
+            </div>
+            <div v-if="item.sources?.length" class="message-detail">
+              <strong>知识来源 {{ item.sources.length }}</strong>
+              <span v-for="source in item.sources.slice(0, 3)" :key="`${source.chunk_id}-${source.title}`">
+                {{ source.title }} · v{{ source.version }}
+              </span>
+            </div>
+            <div v-if="item.timing?.length" class="message-detail timing-detail">
+              <strong>耗时</strong>
+              <span v-for="step in item.timing" :key="`${step.step}-${step.total_ms}`">
+                {{ step.step }}：{{ step.elapsed_ms }}ms
+              </span>
+            </div>
+          </div>
         </article>
       </div>
       <div class="chat-composer">
+        <input ref="imageInputRef" class="hidden-file-input" type="file" accept="image/*" capture="environment" @change="askWithImage" />
+        <el-button :icon="Camera" :loading="isUploadingQueryImage" circle @click="chooseQueryImage" />
         <el-input
           v-model="question"
           type="textarea"
@@ -392,16 +565,19 @@ onMounted(async () => {
           <el-form-item label="文字">
             <el-input v-model="knowledgeForm.content" type="textarea" :rows="4" placeholder="可直接粘贴文字" />
           </el-form-item>
+          <el-form-item label="网页链接">
+            <el-input v-model="knowledgeForm.source_url" placeholder="https://..." clearable />
+          </el-form-item>
           <el-form-item label="文件">
             <el-upload
               v-model:file-list="uploadFileList"
               :auto-upload="false"
               :limit="1"
-              accept=".pdf,.txt,.md,.jpg,.jpeg,.png,.bmp,.webp"
+              accept=".pdf,.docx,.txt,.md,.jpg,.jpeg,.png,.bmp,.webp"
               :on-change="handleFileChange"
               :on-remove="handleFileRemove"
             >
-              <el-button>选择 PDF / 图片 / 文本</el-button>
+              <el-button>选择 PDF / DOCX / 图片 / 文本</el-button>
             </el-upload>
           </el-form-item>
           <el-button type="primary" :loading="isUploadingKnowledge" @click="uploadKnowledge">上传</el-button>

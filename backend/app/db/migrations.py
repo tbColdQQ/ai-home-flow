@@ -381,13 +381,61 @@ def migrate() -> None:
             ("knowledge_type", "TEXT"),
             ("source_type", "TEXT"),
             ("source_file", "TEXT"),
+            ("source_url", "TEXT"),
             ("file_path", "TEXT"),
             ("uploader_user_id", "INTEGER"),
             ("version", "INTEGER NOT NULL DEFAULT 1"),
             ("archived_time", "TEXT"),
             ("error_message", "TEXT"),
+            ("category", "TEXT"),
+            ("permission_scope", "TEXT"),
+            ("index_status", "TEXT NOT NULL DEFAULT 'indexed'"),
+            ("indexed_time", "TEXT"),
+            ("document_summary", "TEXT"),
+            ("effective_date", "TEXT"),
+            ("expired_date", "TEXT"),
         ]:
             _add_column(conn, "knowledge_documents", column, definition)
+
+        for column, definition in [
+            ("parent_chunk_id", "INTEGER"),
+            ("chunk_level", "TEXT NOT NULL DEFAULT 'child'"),
+            ("summary", "TEXT"),
+            ("tags", "TEXT"),
+            ("metadata_json", "TEXT"),
+            ("chroma_id", "TEXT"),
+            ("page_number", "INTEGER"),
+        ]:
+            _add_column(conn, "knowledge_chunks", column, definition)
+
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS agent_runs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id INTEGER,
+                message_id INTEGER,
+                user_id INTEGER,
+                question TEXT NOT NULL,
+                mode TEXT,
+                intent TEXT,
+                status TEXT NOT NULL,
+                router_result_json TEXT,
+                deal_query_json TEXT,
+                deal_result_json TEXT,
+                rag_sources_json TEXT,
+                latency_ms INTEGER,
+                error_message TEXT,
+                create_time TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(session_id) REFERENCES chat_sessions(id),
+                FOREIGN KEY(message_id) REFERENCES chat_messages(id),
+                FOREIGN KEY(user_id) REFERENCES users(id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_agent_runs_user_time ON agent_runs(user_id, create_time);
+            CREATE INDEX IF NOT EXISTS idx_knowledge_documents_index_status ON knowledge_documents(index_status);
+            CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_chroma_id ON knowledge_chunks(chroma_id);
+            """
+        )
 
         conn.execute(
             "INSERT OR IGNORE INTO cities(name, code) VALUES (?, ?)",
