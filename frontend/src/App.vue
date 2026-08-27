@@ -106,6 +106,7 @@ const canManageUsers = computed(() => isAdmin.value || isStoreManager.value)
 const canEditOrders = computed(() => isAdmin.value || isStoreManager.value)
 const canEditDuty = computed(() => isAdmin.value || isStoreManager.value)
 const canManageLeases = computed(() => user.value?.roles?.some((role) => ['admin', 'rental_agent'].includes(role)))
+const canManageKnowledge = computed(() => isLoggedIn.value)
 const totalPages = computed(() => Math.max(1, Math.ceil(orderTotal.value / orderPageSize.value)))
 const leaseTotalPages = computed(() => Math.max(1, Math.ceil(leaseTotal.value / leasePageSize.value)))
 const todayText = computed(() => formatDate(new Date()))
@@ -123,7 +124,7 @@ const menus = computed(() => [
   { key: 'orders', label: '成交数据' },
   ...(canManageLeases.value ? [{ key: 'leases', label: '租赁房源' }] : []),
   { key: 'qa', label: '智能问答' },
-  ...(isAdmin.value ? [{ key: 'knowledge', label: '知识库管理' }] : []),
+  ...(canManageKnowledge.value ? [{ key: 'knowledge', label: '知识库管理' }] : []),
   ...(canManageUsers.value ? [{ key: 'admin', label: isAdmin.value ? '权限管理' : '用户管理' }] : []),
 ])
 
@@ -361,7 +362,7 @@ async function loadAll() {
 }
 
 async function loadKnowledgeDocuments() {
-  if (!isAdmin.value) return
+  if (!canManageKnowledge.value) return
   knowledgeDocuments.value = await api('/api/qa/knowledge')
 }
 
@@ -1727,7 +1728,7 @@ watch(dutyCalendarDate, (value) => {
           <el-table-column prop="create_time" label="上传时间" width="170" />
           <el-table-column label="操作" width="90" fixed="right">
             <template #default="{ row }">
-              <el-button v-if="row.status === 'active'" size="small" type="danger" @click="deleteKnowledgeDocument(row)">归档</el-button>
+              <el-button v-if="isAdmin && row.status === 'active'" size="small" type="danger" @click="deleteKnowledgeDocument(row)">归档</el-button>
             </template>
           </el-table-column>
         </el-table>
