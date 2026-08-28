@@ -94,6 +94,7 @@ const showScanDialog = ref(false)
 const scanDate = ref(new Date().toISOString().slice(0, 10))
 const isScanning = ref(false)
 const isUploadingImages = ref(false)
+const imageUploadRef = ref(null)
 const imageUploadFileList = ref([])
 const scanDetails = ref([])
 
@@ -107,6 +108,8 @@ const canEditOrders = computed(() => isAdmin.value || isStoreManager.value)
 const canEditDuty = computed(() => isAdmin.value || isStoreManager.value)
 const canManageLeases = computed(() => user.value?.roles?.some((role) => ['admin', 'rental_agent'].includes(role)))
 const canManageKnowledge = computed(() => isLoggedIn.value)
+const showDutyCalendar = false
+const hasSelectedImageFiles = computed(() => imageUploadFileList.value.some((item) => item.raw instanceof File))
 const totalPages = computed(() => Math.max(1, Math.ceil(orderTotal.value / orderPageSize.value)))
 const leaseTotalPages = computed(() => Math.max(1, Math.ceil(leaseTotal.value / leasePageSize.value)))
 const todayText = computed(() => formatDate(new Date()))
@@ -330,6 +333,7 @@ async function changeTaskStatus(status) {
 }
 
 async function loadDuty() {
+  if (!showDutyCalendar) return
   const data = await api(`/api/duty/schedule?month=${dutyMonth.value}`)
   dutyDays.value = data.days || []
   dutyRoster.value = data.roster || []
@@ -695,6 +699,14 @@ function isLeaseTask(task) {
   return task?.task_type === 'lease_expiry'
 }
 
+function isOrderConfirmTask(task) {
+  return task?.task_type === 'ocr_order_confirm'
+}
+
+function canEditTask(task) {
+  return task?.status === 'pending'
+}
+
 function leaseTaskPayload(task) {
   if (!task?.payload_json) return {}
   try {
@@ -805,11 +817,14 @@ async function deleteOrder(item) {
 
 function openScanDialog() {
   scanDetails.value = []
+  clearImageUploadFiles()
   showScanDialog.value = true
 }
 
 function closeScanDialog() {
   showScanDialog.value = false
+  scanDetails.value = []
+  clearImageUploadFiles()
 }
 
 function handleImageFileChange(_file, files) {
@@ -820,9 +835,15 @@ function handleImageFileRemove(_file, files) {
   imageUploadFileList.value = files
 }
 
+function clearImageUploadFiles() {
+  imageUploadFileList.value = []
+  imageUploadRef.value?.clearFiles?.()
+}
+
 async function scanImages() {
   if (!scanDate.value || isScanning.value) return
   isScanning.value = true
+  scanDetails.value = []
   try {
     const data = await api('/api/images/scan', {
       method: 'POST',
@@ -843,16 +864,18 @@ async function uploadImages(scanAfterUpload = false) {
   const files = imageUploadFileList.value.map((item) => item.raw).filter(Boolean)
   if (!files.length) {
     message.value = '请选择要上传的成交图片'
+    clearImageUploadFiles()
     return
   }
   isUploadingImages.value = true
+  scanDetails.value = []
   try {
     const form = new FormData()
     form.append('business_date', scanDate.value)
     form.append('scan_after_upload', scanAfterUpload ? 'true' : 'false')
     files.forEach((file) => form.append('files', file))
     const data = await apiForm('/api/images/upload', form)
-    imageUploadFileList.value = []
+    clearImageUploadFiles()
     if (data.scan) {
       const scan = data.scan
       scanDetails.value = scan.details || []
@@ -1313,7 +1336,7 @@ onBeforeUnmount(() => {
 })
 
 watch(dutyCalendarDate, (value) => {
-  if (isLoggedIn.value) syncDutyMonthFromCalendar(value)
+  if (isLoggedIn.value && showDutyCalendar) syncDutyMonthFromCalendar(value)
 })
 </script>
 
@@ -1406,18 +1429,18 @@ watch(dutyCalendarDate, (value) => {
                 <div v-if="row.status === 'pending'" class="row-actions">
                   <el-button v-if="isLeaseTask(row)" size="small" @click="addLeaseFollowup(row)">添加回访</el-button>
                   <el-button v-if="!isLeaseTask(row) && canScanImages" size="small" @click="openTask(row)">修改/确认</el-button>
-                  <el-button size="small" @click="acknowledgeTask(row)">已知悉</el-button>
+                  <el-button v-if="!isOrderConfirmTask(row)" size="small" @click="acknowledgeTask(row)">已知悉</el-button>
                   <el-button v-if="isLeaseTask(row) && row.followup_count > 0" size="small" type="danger" @click="suppressLeaseTask(row)">不再提示</el-button>
                 </div>
                 <div v-else class="row-actions">
-                  <el-button v-if="canDeleteDoneTask(row)" size="small" type="danger" @click="deleteTask(row)">删除</el-button>
+                  <el-button size="small" @click="openTask(row)">查看</el-button>
                 </div>
               </template>
             </el-table-column>
           </el-table>
         </section>
 
-        <section class="panel">
+        <section v-if="showDutyCalendar" class="panel">
           <div class="panel-header">
             <h2>值班日历</h2>
           </div>
@@ -1762,11 +1785,11 @@ watch(dutyCalendarDate, (value) => {
               <div v-if="row.status === 'pending'" class="row-actions">
                 <el-button v-if="isLeaseTask(row)" size="small" @click="addLeaseFollowup(row)">添加回访</el-button>
                 <el-button v-if="!isLeaseTask(row) && canScanImages" size="small" @click="openTask(row)">修改/确认</el-button>
-                <el-button size="small" @click="acknowledgeTask(row)">已知悉</el-button>
+                <el-button v-if="!isOrderConfirmTask(row)" size="small" @click="acknowledgeTask(row)">已知悉</el-button>
                 <el-button v-if="isLeaseTask(row) && row.followup_count > 0" size="small" type="danger" @click="suppressLeaseTask(row)">不再提示</el-button>
               </div>
               <div v-else class="row-actions">
-                <el-button v-if="canDeleteDoneTask(row)" size="small" type="danger" @click="deleteTask(row)">删除</el-button>
+                <el-button size="small" @click="openTask(row)">查看</el-button>
               </div>
             </template>
           </el-table-column>
@@ -1924,7 +1947,7 @@ watch(dutyCalendarDate, (value) => {
       </section>
     </section>
 
-    <el-dialog v-model="showScanDialog" title="上传/扫描成交图片" width="560px">
+    <el-dialog v-model="showScanDialog" title="上传/扫描成交图片" width="560px" @closed="closeScanDialog">
       <el-form label-position="top">
         <el-form-item label="图片日期">
           <el-date-picker
@@ -1937,11 +1960,12 @@ watch(dutyCalendarDate, (value) => {
         </el-form-item>
         <el-form-item label="成交图片">
           <el-upload
+            ref="imageUploadRef"
             drag
             multiple
             accept=".jpg,.jpeg,.png,.bmp,.webp"
             :auto-upload="false"
-            :file-list="imageUploadFileList"
+            v-model:file-list="imageUploadFileList"
             :on-change="handleImageFileChange"
             :on-remove="handleImageFileRemove"
           >
@@ -1967,13 +1991,13 @@ watch(dutyCalendarDate, (value) => {
         </el-table-column>
       </el-table>
       <template #footer>
-        <el-button :disabled="isScanning || isUploadingImages" @click="showScanDialog = false">取消</el-button>
-        <el-button :loading="isUploadingImages" :disabled="!scanDate" @click="uploadImages(false)">仅上传</el-button>
+        <el-button :disabled="isScanning || isUploadingImages" @click="closeScanDialog">取消</el-button>
+        <el-button :loading="isUploadingImages" :disabled="!scanDate || !hasSelectedImageFiles" @click="uploadImages(false)">仅上传</el-button>
         <el-button :loading="isScanning" :disabled="!scanDate || isUploadingImages" @click="scanImages">扫描已有图片</el-button>
         <el-button
           type="primary"
           :loading="isUploadingImages"
-          :disabled="!scanDate || !imageUploadFileList.length || isScanning"
+          :disabled="!scanDate || !hasSelectedImageFiles || isScanning"
           @click="uploadImages(true)"
         >
           上传并扫描
@@ -2092,7 +2116,7 @@ watch(dutyCalendarDate, (value) => {
     <div v-if="selectedTask" class="dialog-backdrop" @click.self="closeTaskDialog">
       <section class="dialog">
         <div class="panel-header">
-          <h2>处理待办</h2>
+          <h2>{{ canEditTask(selectedTask) ? '处理待办' : '查看待办' }}</h2>
           <button class="secondary" @click="closeTaskDialog">关闭</button>
         </div>
         <div class="task-source">
@@ -2101,24 +2125,27 @@ watch(dutyCalendarDate, (value) => {
           <p>{{ selectedTask.reason }}</p>
           <pre v-if="selectedTask.ocr_text">{{ selectedTask.ocr_text }}</pre>
         </div>
-        <div class="form-grid">
+        <div v-if="isLeaseTask(selectedTask)" class="task-source">
+          <p>{{ leaseTaskSummary(selectedTask) }}</p>
+        </div>
+        <div v-else class="form-grid">
           <label v-for="[key, label, type] in orderFields" :key="key">
             {{ label }}
-            <input v-model="taskForm[key]" :type="type" />
+            <input v-model="taskForm[key]" :type="type" :disabled="!canEditTask(selectedTask)" />
           </label>
           <label>
             车位
-            <select v-model.number="taskForm.parking">
+            <select v-model.number="taskForm.parking" :disabled="!canEditTask(selectedTask)">
               <option :value="0">无</option>
               <option :value="1">有</option>
             </select>
           </label>
           <label>
             处理备注
-            <input v-model="taskRemark" />
+            <input v-model="taskRemark" :disabled="!canEditTask(selectedTask)" />
           </label>
         </div>
-        <div class="actions">
+        <div v-if="canEditTask(selectedTask)" class="actions">
           <button class="secondary" @click="saveTaskDraft">保存修改</button>
           <button @click="completeTask">确认入库</button>
           <button class="danger" @click="deleteTask()">删除待办</button>

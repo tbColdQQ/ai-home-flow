@@ -62,6 +62,7 @@ async def upload_images(
     target_dir.mkdir(parents=True, exist_ok=True)
 
     saved_files = []
+    saved_paths = []
     for file in files:
         safe_name = _safe_image_name(file.filename or "")
         target_path = target_dir / safe_name
@@ -73,6 +74,7 @@ async def upload_images(
         finally:
             await file.close()
         saved_files.append(target_path.name)
+        saved_paths.append(target_path)
 
     result = {
         "city": user.city,
@@ -82,5 +84,5 @@ async def upload_images(
         "files": saved_files,
     }
     if scan_after_upload:
-        result["scan"] = scan_images(city=user.city, business_date=business_date)
+        result["scan"] = scan_images(city=user.city, business_date=business_date, only_paths=saved_paths)
     return result

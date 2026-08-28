@@ -32,6 +32,21 @@ class Settings:
         self.ocr_provider = os.getenv("HOME_FLOW_OCR_PROVIDER", "rapidocr").lower()
         self.ocr_min_score = float(os.getenv("HOME_FLOW_OCR_MIN_SCORE", "0.45"))
         self.ocr_auto_confirm_threshold = float(os.getenv("HOME_FLOW_OCR_AUTO_CONFIRM_THRESHOLD", "0.92"))
+        self.tencent_ocr_secret_id = (
+            os.getenv("TENCENT_OCR_ID")
+            or os.getenv("TENCENTCLOUD_SECRET_ID")
+            or os.getenv("TENCENT_SECRET_ID")
+            or ""
+        )
+        self.tencent_ocr_secret_key = (
+            os.getenv("TENCENT_OCR_KEY")
+            or os.getenv("TENCENTCLOUD_SECRET_KEY")
+            or os.getenv("TENCENT_SECRET_KEY")
+            or ""
+        )
+        self.tencent_ocr_region = os.getenv("TENCENT_OCR_REGION", "ap-guangzhou")
+        self.tencent_ocr_action = os.getenv("TENCENT_OCR_ACTION", "GeneralAccurateOCR")
+        self.tencent_ocr_timeout_seconds = float(os.getenv("TENCENT_OCR_TIMEOUT_SECONDS", "15"))
         self.llm_enabled = os.getenv("HOME_FLOW_LLM_ENABLED", "false").lower() == "true"
         self.llm_provider = os.getenv("HOME_FLOW_LLM_PROVIDER", "deepseek")
         self.llm_api_key = os.getenv("HOME_FLOW_LLM_API_KEY", "")

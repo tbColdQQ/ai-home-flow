@@ -12,6 +12,7 @@ from app.services.lease_task_service import (
     suppress_lease_task,
     task_has_followup,
 )
+from app.services.image_import_service import confirm_image_task_order
 from app.services.order_service import create_order
 
 
@@ -196,7 +197,10 @@ def complete_task(task_id: int, body: CompleteTaskRequest, user: CurrentUser = D
         order_data.setdefault("source_id", task["source_id"])
         order_data.setdefault("review_status", "confirmed")
         order_data.setdefault("raw_payload_json", json.dumps(order_data, ensure_ascii=False))
-        order_id = create_order(conn, order_data)
+        if task["source_type"] == "image":
+            order_id = confirm_image_task_order(conn, task, order_data)
+        else:
+            order_id = create_order(conn, order_data)
 
         conn.execute(
             """
@@ -206,19 +210,6 @@ def complete_task(task_id: int, body: CompleteTaskRequest, user: CurrentUser = D
             """,
             (order_id, task_id),
         )
-        if task["source_type"] == "image":
-            conn.execute(
-                """
-                UPDATE source_images
-                SET status = 'confirmed',
-                    related_order_id = ?,
-                    parsed_result_json = ?,
-                    error_message = NULL,
-                    modify_time = CURRENT_TIMESTAMP
-                WHERE id = ?
-                """,
-                (order_id, json.dumps(order_data, ensure_ascii=False), task["source_id"]),
-            )
         conn.execute(
             """
             INSERT INTO task_logs(task_id, action, operator_user_id, after_json, remark)
@@ -237,6 +228,8 @@ def acknowledge_task(task_id: int, user: CurrentUser = Depends(current_user)) ->
         ensure_task_access(task, user)
         if task["status"] != "pending":
             raise HTTPException(status_code=400, detail="待办已处理")
+        if task.get("task_type") == "ocr_order_confirm":
+            raise HTTPException(status_code=400, detail="成交图片待办请先修改并确认入库")
         conn.execute(
             "UPDATE task_items SET status = 'done', finish_time = CURRENT_TIMESTAMP WHERE id = ?",
             (task_id,),

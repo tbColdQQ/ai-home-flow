@@ -38,6 +38,10 @@ IGNORE_LINES = {
     "nohep",
 }
 
+ORG_NAME_PATTERN = re.compile(
+    r"(税务局|公安局|财政局|住建局|市场监管局|管理局|委员会|办事处|法院|检察院|医院|学校|银行|公司|集团)$"
+)
+
 
 def _normalize_label(line: str) -> str:
     return re.sub(r"[\s:：]+", "", line)
@@ -95,9 +99,11 @@ def _date_after_labels(lines: list[str], labels: list[str]) -> str | None:
 
 
 def _report_type(clean_text: str) -> str:
-    if "房源售出" in clean_text or "维护楼盘" in clean_text or "维护人CA" in clean_text:
-        return "maintainor_report"
+    if "贺报" in clean_text or "賀報" in clean_text or "房源售出" in clean_text:
+        return "agent_report"
     if "喜报" in clean_text or "签约金额" in clean_text or "二手成交速递" in clean_text:
+        return "maintainor_report"
+    if "维护楼盘" in clean_text or "维护人CA" in clean_text:
         return "agent_report"
     return "unknown"
 
@@ -123,7 +129,7 @@ def _participant_and_store(lines: list[str], residential: str | None, ca: str | 
         if store is None and value.endswith("店"):
             store = value
             continue
-        if participant is None and 2 <= len(value) <= 5 and not re.search(r"\d", value):
+        if participant is None and 2 <= len(value) <= 5 and not re.search(r"\d", value) and not ORG_NAME_PATTERN.search(value):
             participant = value
     return participant, store
 

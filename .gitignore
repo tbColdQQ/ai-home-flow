@@ -10,6 +10,7 @@ dist-h5/
 
 data/storage/*.db
 data/storage/*.db-*
+data/chroma/
 data/backups/
 data/incoming/
 tmp/

@@ -13,9 +13,8 @@ from app.api.deps import current_user
 from app.core.config import settings
 from app.db.session import get_connection
 from app.services.auth_service import CurrentUser
-from app.services.image_import_service import IMAGE_EXTENSIONS, extract_text
+from app.services.image_import_service import IMAGE_EXTENSIONS, extract_order_from_image
 from app.services.knowledge_service import archive_knowledge_document, create_knowledge_document, list_knowledge_documents
-from app.services.parser_service import parse_order_text
 from app.services.rag_service import normalize_community_name, retrieve_context
 from app.services.qa_service import answer_question, answer_question_stream
 
@@ -183,12 +182,12 @@ async def ask_image_stream(
         with get_connection() as conn:
             try:
                 yield json.dumps({"type": "status", "content": "正在识别图片文字..."}, ensure_ascii=False) + "\n"
-                ocr_text, error = extract_text(target_path)
+                ocr_text, error, parsed_data, confidence, reasons, ocr_provider = extract_order_from_image(
+                    target_path, user.city, date.today().isoformat()
+                )
                 if error:
                     yield json.dumps({"type": "error", "content": error}, ensure_ascii=False) + "\n"
                     return
-                parsed = parse_order_text(ocr_text, user.city, date.today().isoformat())
-                parsed_data = dict(parsed.data)
                 normalized = normalize_community_name(conn, user.city, parsed_data.get("residential"))
                 if normalized.get("name"):
                     parsed_data["residential"] = normalized["name"]
@@ -196,8 +195,9 @@ async def ask_image_stream(
                     "file_name": file.filename,
                     "ocr_text": ocr_text,
                     "parsed": parsed_data,
-                    "confidence": parsed.confidence,
-                    "reasons": parsed.reasons,
+                    "confidence": confidence,
+                    "reasons": reasons,
+                    "ocr_provider": ocr_provider,
                     "community_normalization": normalized,
                     "saved_path": str(target_path),
                 }
