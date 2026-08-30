@@ -665,6 +665,18 @@ th {
   border-radius: 6px;
 }
 
+.readonly.missing {
+  color: #b45309;
+  background: #fffbeb;
+  border-color: #fcd34d;
+}
+
+.missing-hint {
+  margin: -2px 0 14px;
+  color: #b45309;
+  font-size: 13px;
+}
+
 .dialog-backdrop {
   position: fixed;
   inset: 0;

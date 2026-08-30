@@ -150,6 +150,23 @@ const orderFields = [
   ['remark', '备注', 'text'],
 ]
 
+const imageTaskFields = [
+  ['signing_date', '成交日期'],
+  ['agent', '成交人'],
+  ['maintainor', '维护人'],
+  ['residential', '成交小区'],
+  ['acreage', '面积'],
+  ['price', '成交价'],
+]
+const imageTaskMissingReasonMap = {
+  signing_date: ['成交日期缺失', '签约日期缺失'],
+  agent: ['成交人缺失'],
+  maintainor: ['维护人缺失'],
+  residential: ['楼盘缺失', '成交小区缺失'],
+  acreage: ['房源面积缺失', '面积缺失'],
+  price: ['成交价格缺失', '成交价缺失'],
+}
+
 const leaseFields = [
   ['community_name', '小区名称', 'text'],
   ['address', '房源地址', 'text'],
@@ -739,13 +756,48 @@ function leaseTaskSummary(task) {
   ].filter(Boolean).join(' · ')
 }
 
+function imageTaskPayload(task) {
+  return taskPayload(task)
+}
+
+function imageTaskValue(payload, key) {
+  const value = payload?.[key]
+  return value === null || value === undefined || value === '' ? '未识别' : value
+}
+
+function imageTaskMissingLabels(task) {
+  const reason = String(task?.reason || '')
+  const payload = imageTaskPayload(task)
+  return imageTaskFields
+    .filter(([key, label]) => {
+      const missingValue = payload?.[key] === null || payload?.[key] === undefined || payload?.[key] === ''
+      const missingReason = (imageTaskMissingReasonMap[key] || [`${label}缺失`]).some((text) => reason.includes(text))
+      return missingValue || missingReason
+    })
+    .map(([, label]) => label)
+}
+
+function imageTaskSummary(task) {
+  const payload = imageTaskPayload(task)
+  if (task?.reason) return task.reason
+  return `${imageTaskValue(payload, 'signing_date')}成交的${imageTaskValue(payload, 'residential')}小区，面积${imageTaskValue(payload, 'acreage')}，成交价${imageTaskValue(payload, 'price')}，信息待确认`
+}
+
+async function openTaskOrder(task) {
+  const orderId = task?.result_ref_id
+  closeTaskDialog()
+  activePage.value = 'orders'
+  await loadOrders()
+  if (orderId) await openOrder({ ID: orderId }, 'edit')
+}
+
 function taskTypeLabel(task) {
   return isLeaseTask(task) ? '租赁到期' : '成交确认'
 }
 
 function taskSourceText(task) {
   if (isLeaseTask(task)) return leaseTaskSummary(task)
-  return [task.city, task.file_name || task.source_type, task.reason].filter(Boolean).join(' · ')
+  return imageTaskSummary(task)
 }
 
 function canDeleteDoneTask(task) {
@@ -2140,32 +2192,30 @@ watch(dutyCalendarDate, (value) => {
         <div class="task-source">
           <strong>{{ selectedTask.file_name || selectedTask.title }}</strong>
           <span>{{ selectedTask.city }} · {{ selectedTask.business_date || '-' }}</span>
-          <p>{{ selectedTask.reason }}</p>
-          <pre v-if="selectedTask.ocr_text">{{ selectedTask.ocr_text }}</pre>
+          <p>{{ isLeaseTask(selectedTask) ? selectedTask.reason : imageTaskSummary(selectedTask) }}</p>
+          <pre v-if="isLeaseTask(selectedTask) && selectedTask.ocr_text">{{ selectedTask.ocr_text }}</pre>
         </div>
         <div v-if="isLeaseTask(selectedTask)" class="task-source">
           <p>{{ leaseTaskSummary(selectedTask) }}</p>
         </div>
         <div v-else class="form-grid">
-          <label v-for="[key, label, type] in orderFields" :key="key">
+          <label v-for="[key, label] in imageTaskFields" :key="key">
             {{ label }}
-            <input v-model="taskForm[key]" :type="type" :disabled="!canEditTask(selectedTask)" />
-          </label>
-          <label>
-            车位
-            <select v-model.number="taskForm.parking" :disabled="!canEditTask(selectedTask)">
-              <option :value="0">无</option>
-              <option :value="1">有</option>
-            </select>
-          </label>
-          <label>
-            处理备注
-            <input v-model="taskRemark" :disabled="!canEditTask(selectedTask)" />
+            <span class="readonly" :class="{ missing: imageTaskMissingLabels(selectedTask).includes(label) }">
+              {{ imageTaskValue(taskForm, key) }}
+            </span>
           </label>
         </div>
-        <div v-if="canEditTask(selectedTask)" class="actions">
+        <div v-if="!isLeaseTask(selectedTask) && imageTaskMissingLabels(selectedTask).length" class="missing-hint">
+          缺失：{{ imageTaskMissingLabels(selectedTask).join('、') }}
+        </div>
+        <div v-if="canEditTask(selectedTask) && isLeaseTask(selectedTask)" class="actions">
           <button class="secondary" @click="saveTaskDraft">保存修改</button>
           <button @click="completeTask">确认入库</button>
+          <button class="danger" @click="deleteTask()">删除待办</button>
+        </div>
+        <div v-else-if="canEditTask(selectedTask)" class="actions">
+          <button @click="openTaskOrder(selectedTask)">去成交列表修改</button>
           <button class="danger" @click="deleteTask()">删除待办</button>
         </div>
       </section>

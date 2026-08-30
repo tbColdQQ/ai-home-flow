@@ -492,6 +492,26 @@ def _merge_order_data(base: dict, incoming: dict) -> dict:
     return merged
 
 
+def _format_task_value(value: Any) -> str:
+    if value in (None, ""):
+        return "未识别"
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value)
+
+
+def _review_task_summary(data: dict, review_reasons: list[str], business_date: str) -> str:
+    signing_date = data.get("signing_date") or business_date
+    residential = data.get("residential")
+    acreage = data.get("acreage")
+    price = data.get("price")
+    missing = "、".join(review_reasons) if review_reasons else "信息待确认"
+    return (
+        f"{_format_task_value(signing_date)}成交的{_format_task_value(residential)}小区，"
+        f"面积{_format_task_value(acreage)}，成交价{_format_task_value(price)}，{missing}"
+    )
+
+
 def _find_matching_pending_task(conn, city: str, payload: dict, source_id: int | None) -> dict | None:
     rows = conn.execute(
         """
@@ -516,7 +536,15 @@ def _find_matching_pending_task(conn, city: str, payload: dict, source_id: int |
     return None
 
 
-def _upsert_pending_task(conn, source_id: int | None, city: str, store: str | None, payload_json: str | None, reason: str) -> None:
+def _upsert_pending_task(
+    conn,
+    source_id: int | None,
+    city: str,
+    store: str | None,
+    payload_json: str | None,
+    reason: str,
+    order_id: int | None = None,
+) -> None:
     payload = None
     if payload_json:
         try:
@@ -548,10 +576,12 @@ def _upsert_pending_task(conn, source_id: int | None, city: str, store: str | No
                 city = ?,
                 store = ?,
                 payload_json = ?,
-                reason = ?
+                reason = ?,
+                result_ref_type = ?,
+                result_ref_id = ?
             WHERE id = ?
             """,
-            (city, store, payload_json, reason, task["id"]),
+            (city, store, payload_json, reason, "order" if order_id else None, order_id, task["id"]),
         )
         return
 
@@ -559,11 +589,11 @@ def _upsert_pending_task(conn, source_id: int | None, city: str, store: str | No
         """
         INSERT INTO task_items(
             task_type, title, city, store, source_type, source_id,
-            assignee_role, payload_json, reason
+            assignee_role, payload_json, reason, result_ref_type, result_ref_id
         )
-        VALUES ('ocr_order_confirm', '成交图片识别待确认', ?, ?, 'image', ?, 'store_manager', ?, ?)
+        VALUES ('ocr_order_confirm', '成交图片识别待确认', ?, ?, 'image', ?, 'store_manager', ?, ?, ?, ?)
         """,
-        (city, store, source_id, payload_json, reason),
+        (city, store, source_id, payload_json, reason, "order" if order_id else None, order_id),
     )
 
 
@@ -581,6 +611,30 @@ def _mark_source_tasks_done(conn, source_id: int, order_id: int) -> None:
         """,
         (order_id, source_id),
     )
+
+
+def _ensure_review_order(conn, source_id: int, image_path: Path, order_data: dict, parsed_json: str) -> int | None:
+    if not any(order_data.get(field) not in (None, "") for field in ["residential", "acreage", "price", "agent", "maintainor"]):
+        return None
+    existing_order = _find_matching_order(conn, order_data)
+    if existing_order:
+        order_id = int(existing_order["ID"])
+        payload = _merge_order_payload(existing_order, order_data, source_id, image_path, parsed_json)
+        payload["review_status"] = "pending_review"
+        _update_order_from_image(conn, order_id, payload)
+        return order_id
+
+    payload = dict(order_data)
+    payload.update(
+        {
+            "source_type": "image",
+            "source_id": source_id,
+            "source_file": str(image_path),
+            "review_status": "pending_review",
+            "raw_payload_json": parsed_json,
+        }
+    )
+    return create_order(conn, payload)
 
 
 def mark_matching_image_tasks_done(conn, order_data: dict, order_id: int) -> None:
@@ -910,6 +964,7 @@ def _handle_pending_source(
     confidence_json: str | None,
     reason: str,
     store: str | None,
+    order_id: int | None = None,
 ) -> int:
     if existing_source_id:
         source_id = existing_source_id
@@ -927,7 +982,17 @@ def _handle_pending_source(
             confidence_json,
             reason,
         )
-    _upsert_pending_task(conn, source_id, city, store, parsed_json, reason)
+    if order_id:
+        conn.execute(
+            """
+            UPDATE source_images
+            SET related_order_id = ?,
+                modify_time = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (order_id, source_id),
+        )
+    _upsert_pending_task(conn, source_id, city, store, parsed_json, reason, order_id)
     return source_id
 
 
@@ -1095,8 +1160,37 @@ def scan_images(
 
         with get_connection() as conn:
             if review_reasons:
-                reason = ";".join(review_reasons)
-                source_id = _handle_pending_source(conn, existing_source_id, city, business_date, image_path, digest, ocr_text, parsed_json, confidence_json, reason, task_store)
+                reason = _review_task_summary(parsed_data, review_reasons, business_date)
+                _apply_community_fields(conn, parsed_data)
+                source_id = _handle_pending_source(
+                    conn,
+                    existing_source_id,
+                    city,
+                    business_date,
+                    image_path,
+                    digest,
+                    ocr_text,
+                    parsed_json,
+                    confidence_json,
+                    reason,
+                    task_store,
+                )
+                order_id = _ensure_review_order(conn, source_id, image_path, parsed_data, parsed_json)
+                if order_id:
+                    _handle_pending_source(
+                        conn,
+                        source_id,
+                        city,
+                        business_date,
+                        image_path,
+                        digest,
+                        ocr_text,
+                        parsed_json,
+                        confidence_json,
+                        reason,
+                        task_store,
+                        order_id,
+                    )
                 conn.commit()
                 result["pending"] += 1
                 result["details"].append(
@@ -1105,6 +1199,7 @@ def scan_images(
                         "status": "pending",
                         "message": reason,
                         "source_id": source_id,
+                        "order_id": order_id,
                         "parsed": parsed_data,
                     }
                 )
