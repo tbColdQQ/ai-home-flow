@@ -339,16 +339,38 @@ def _participant_and_store_from_ocr(lines: list[str], data: dict) -> tuple[str |
     return participant, store
 
 
+def _report_type_from_ocr(compact_text: str) -> str | None:
+    if any(token in compact_text for token in ["房源售出", "贺报", "賀報", "维护楼盘", "维护人CA"]):
+        return "maintainor_report"
+    if any(token in compact_text for token in ["签约金额", "签约小区", "签约面积", "签约CA", "喜报", "二手成交速递"]):
+        return "agent_report"
+    return None
+
+
+def _move_participant_to_report_fields(data: dict, report_type: str) -> None:
+    if report_type == "agent_report":
+        if not data.get("agent") and data.get("maintainor"):
+            data["agent"] = data["maintainor"]
+        if not data.get("store") and data.get("maintainor_store"):
+            data["store"] = data["maintainor_store"]
+        data.pop("maintainor", None)
+        data.pop("maintainor_store", None)
+    elif report_type == "maintainor_report":
+        if not data.get("maintainor") and data.get("agent"):
+            data["maintainor"] = data["agent"]
+        if not data.get("maintainor_store") and data.get("store"):
+            data["maintainor_store"] = data["store"]
+        data.pop("agent", None)
+        data.pop("store", None)
+
+
 def _enhance_parsed_data_from_ocr(data: dict, ocr_text: str) -> dict:
     lines = [line.strip() for line in ocr_text.splitlines() if line.strip()]
     compact = _compact_text(ocr_text)
-    if data.get("report_type") in (None, "", "unknown"):
-        if any(token in compact for token in ["房源售出", "贺报", "賀報"]):
-            data["report_type"] = "maintainor_report"
-        elif any(token in compact for token in ["签约金额", "签约小区", "签约面积", "签约CA", "喜报"]):
-            data["report_type"] = "agent_report"
-        elif any(token in compact for token in ["维护楼盘", "维护人CA"]):
-            data["report_type"] = "maintainor_report"
+    detected_report_type = _report_type_from_ocr(compact)
+    if detected_report_type:
+        data["report_type"] = detected_report_type
+        _move_participant_to_report_fields(data, detected_report_type)
 
     if not data.get("residential"):
         data["residential"] = _line_after_ocr_labels(lines, ["维护楼盘", "签约小区", "成交小区", "楼盘", "小区"])
