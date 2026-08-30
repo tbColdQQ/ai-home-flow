@@ -429,7 +429,7 @@ def list_knowledge_documents(conn, user: CurrentUser) -> list[dict]:
         SELECT kd.id, kd.title, kd.city, kd.community_name, kd.knowledge_type, kd.category,
                kd.source_type, kd.source_file, kd.source_url, kd.version, kd.status, kd.index_status,
                kd.permission_scope, kd.create_time, kd.modify_time, kd.indexed_time,
-               u.display_name AS uploader, kd.document_summary AS summary,
+               u.display_name AS creator, u.display_name AS uploader, kd.document_summary AS summary,
                COUNT(kc.id) AS chunk_count
         FROM knowledge_documents kd
         LEFT JOIN users u ON u.id = kd.uploader_user_id

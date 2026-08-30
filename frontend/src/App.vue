@@ -344,7 +344,20 @@ async function loadAdminData() {
   if (!canManageUsers.value) return
   const usersData = await api('/api/admin/users')
   users.value = usersData.map((item) => ({ ...item, role_codes: normalizeRoleCodes(item.role_codes) }))
-  if (!isAdmin.value) return
+  if (!isAdmin.value) {
+    const [rolesData, storesData] = await Promise.all([
+      api('/api/admin/roles'),
+      api('/api/admin/stores'),
+    ])
+    roles.value = rolesData
+    stores.value = storesData
+    newUser.value.city_id = storesData[0]?.city_id ?? null
+    newUser.value.store_id = user.value?.store_id ?? storesData[0]?.id ?? null
+    if (!rolesData.some((role) => role.code === newUser.value.role_codes[0])) {
+      newUser.value.role_codes = [rolesData[0]?.code || 'clerk']
+    }
+    return
+  }
   const [overviewData, rolesData, permissionsData, citiesData, storesData] = await Promise.all([
     api('/api/admin/overview'),
     api('/api/admin/roles'),
@@ -1137,7 +1150,14 @@ async function createUser() {
   try {
     await api('/api/admin/users', { method: 'POST', body: JSON.stringify(newUser.value) })
     message.value = '用户已创建'
-    newUser.value = { username: '', display_name: '', password: '', city_id: null, store_id: null, role_codes: ['clerk'] }
+    newUser.value = {
+      username: '',
+      display_name: '',
+      password: '',
+      city_id: isAdmin.value ? null : stores.value[0]?.city_id ?? null,
+      store_id: isAdmin.value ? null : user.value?.store_id ?? stores.value[0]?.id ?? null,
+      role_codes: [roles.value[0]?.code || 'clerk'],
+    }
     await loadAdminData()
   } catch (error) {
     message.value = error.message
@@ -1742,10 +1762,7 @@ watch(dutyCalendarDate, (value) => {
           <el-table-column prop="knowledge_type" label="类型" width="100" />
           <el-table-column prop="community_name" label="小区" min-width="120" show-overflow-tooltip />
           <el-table-column prop="source_type" label="来源类型" width="90" />
-          <el-table-column prop="source_url" label="网页链接" min-width="180" show-overflow-tooltip />
-          <el-table-column prop="chunk_count" label="切片" width="80" />
-          <el-table-column prop="version" label="版本" width="70" />
-          <el-table-column prop="index_status" label="索引状态" width="100" />
+          <el-table-column prop="creator" label="创建人" width="110" show-overflow-tooltip />
           <el-table-column prop="create_time" label="上传时间" width="170" />
           <el-table-column label="操作" width="90" fixed="right">
             <template #default="{ row }">
@@ -1795,18 +1812,21 @@ watch(dutyCalendarDate, (value) => {
       </section>
 
       <section v-if="activePage === 'admin'" class="admin-grid">
-        <div v-if="isAdmin" class="panel">
+        <div v-if="canManageUsers" class="panel">
           <h2>创建用户</h2>
           <div class="form-grid">
             <input v-model="newUser.username" placeholder="登录账号" />
             <input v-model="newUser.display_name" placeholder="姓名" />
             <input v-model="newUser.password" type="password" placeholder="初始密码" />
-            <select v-model="newUser.city_id">
+            <select v-if="isAdmin" v-model="newUser.city_id">
               <option :value="null">默认城市</option>
               <option v-for="city in cities" :key="city.id" :value="city.id">{{ city.name }}</option>
             </select>
-            <select v-model="newUser.store_id">
+            <select v-if="isAdmin" v-model="newUser.store_id">
               <option :value="null">不指定门店</option>
+              <option v-for="store in stores" :key="store.id" :value="store.id">{{ store.name }}</option>
+            </select>
+            <select v-else v-model="newUser.store_id" disabled>
               <option v-for="store in stores" :key="store.id" :value="store.id">{{ store.name }}</option>
             </select>
             <select v-model="newUser.role_codes[0]">

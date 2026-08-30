@@ -9,6 +9,8 @@ from app.services.auth_service import CurrentUser, hash_password
 
 
 router = APIRouter()
+STORE_MANAGER_ROLE_CODES = {"clerk", "rental_clerk"}
+STORE_MANAGER_FORBIDDEN_ROLE_CODES = {"admin", "store_manager", "rental_agent"}
 
 
 class CreateUserRequest(BaseModel):
@@ -56,7 +58,7 @@ def ensure_user_manager(user: CurrentUser) -> None:
         raise HTTPException(status_code=403, detail="需要用户管理权限")
 
 
-def _is_store_clerk(conn, target_user_id: int, store_id: int | None) -> bool:
+def _is_store_managed_user(conn, target_user_id: int, store_id: int | None) -> bool:
     if store_id is None:
         return False
     row = conn.execute(
@@ -69,12 +71,25 @@ def _is_store_clerk(conn, target_user_id: int, store_id: int | None) -> bool:
           AND u.store_id = ?
           AND u.status = 'active'
         GROUP BY u.id
-        HAVING SUM(CASE WHEN r.code = 'clerk' THEN 1 ELSE 0 END) > 0
-           AND SUM(CASE WHEN r.code IN ('admin', 'store_manager') THEN 1 ELSE 0 END) = 0
+        HAVING SUM(CASE WHEN r.code IN ('clerk', 'rental_clerk') THEN 1 ELSE 0 END) > 0
+           AND SUM(CASE WHEN r.code IN ('admin', 'store_manager', 'rental_agent') THEN 1 ELSE 0 END) = 0
         """,
         (target_user_id, store_id),
     ).fetchone()
     return row is not None
+
+
+def _role_codes_from_csv(value: str | None) -> set[str]:
+    return {item.strip() for item in str(value or "").split(",") if item.strip()}
+
+
+def _ensure_store_manager_role_scope(role_codes: list[str]) -> list[str]:
+    normalized = [code for code in dict.fromkeys(role_codes) if code]
+    if not normalized:
+        normalized = ["clerk"]
+    if not set(normalized).issubset(STORE_MANAGER_ROLE_CODES):
+        raise HTTPException(status_code=403, detail="店长只能分配店员或租赁店员角色")
+    return normalized
 
 
 def _replace_role_permissions(conn, role_id: int, permission_codes: list[str]) -> None:
@@ -131,15 +146,31 @@ def list_users(user: CurrentUser = Depends(current_user)) -> list[dict]:
         result = rows_to_dicts(rows)
         if "admin" in user.role_codes:
             return result
-        return [item for item in result if item.get("role_codes") == "clerk"]
+        visible = []
+        for item in result:
+            role_codes = _role_codes_from_csv(item.get("role_codes"))
+            if role_codes.intersection(STORE_MANAGER_ROLE_CODES) and not role_codes.intersection(STORE_MANAGER_FORBIDDEN_ROLE_CODES):
+                visible.append(item)
+        return visible
 
 
 @router.post("/users")
 def create_user(body: CreateUserRequest, user: CurrentUser = Depends(current_user)) -> dict:
-    ensure_admin(user)
+    ensure_user_manager(user)
     with get_connection() as conn:
         city_id = body.city_id
-        if city_id is None:
+        store_id = body.store_id
+        role_codes = body.role_codes
+        if "admin" not in user.role_codes:
+            if user.store_id is None:
+                raise HTTPException(status_code=400, detail="当前店长未绑定门店")
+            role_codes = _ensure_store_manager_role_scope(role_codes)
+            store_id = user.store_id
+            store = conn.execute("SELECT city_id FROM stores WHERE id = ? AND status != 'deleted'", (store_id,)).fetchone()
+            if store is None:
+                raise HTTPException(status_code=400, detail="当前门店不存在")
+            city_id = store["city_id"]
+        elif city_id is None:
             city = conn.execute("SELECT id FROM cities ORDER BY id LIMIT 1").fetchone()
             city_id = city["id"] if city else None
         cursor = conn.execute(
@@ -147,10 +178,10 @@ def create_user(body: CreateUserRequest, user: CurrentUser = Depends(current_use
             INSERT INTO users(username, display_name, password_hash, city_id, store_id)
             VALUES (?, ?, ?, ?, ?)
             """,
-            (body.username, body.display_name, hash_password(body.password), city_id, body.store_id),
+            (body.username, body.display_name, hash_password(body.password), city_id, store_id),
         )
         user_id = int(cursor.lastrowid)
-        for code in body.role_codes:
+        for code in role_codes:
             role = conn.execute("SELECT id FROM roles WHERE code = ?", (code,)).fetchone()
             if role:
                 conn.execute("INSERT OR IGNORE INTO user_roles(user_id, role_id) VALUES (?, ?)", (user_id, role["id"]))
@@ -198,8 +229,8 @@ def reset_user_password(user_id: int, user: CurrentUser = Depends(current_user))
         exists = conn.execute("SELECT id FROM users WHERE id = ? AND status = 'active'", (user_id,)).fetchone()
         if exists is None:
             raise HTTPException(status_code=404, detail="用户不存在")
-        if "admin" not in user.role_codes and not _is_store_clerk(conn, user_id, user.store_id):
-            raise HTTPException(status_code=403, detail="店长只能重置所在门店店员的密码")
+        if "admin" not in user.role_codes and not _is_store_managed_user(conn, user_id, user.store_id):
+            raise HTTPException(status_code=403, detail="店长只能重置所在门店店员或租赁店员的密码")
         password = secrets.token_urlsafe(10)
         conn.execute(
             "UPDATE users SET password_hash = ?, modify_time = CURRENT_TIMESTAMP WHERE id = ?",
@@ -212,17 +243,24 @@ def reset_user_password(user_id: int, user: CurrentUser = Depends(current_user))
 
 @router.get("/roles")
 def list_roles(user: CurrentUser = Depends(current_user)) -> list[dict]:
-    ensure_admin(user)
+    ensure_user_manager(user)
+    where_sql = ""
+    params: tuple = ()
+    if "admin" not in user.role_codes:
+        where_sql = "WHERE r.code IN (?, ?)"
+        params = tuple(sorted(STORE_MANAGER_ROLE_CODES))
     with get_connection() as conn:
         rows = conn.execute(
-            """
+            f"""
             SELECT r.*, GROUP_CONCAT(p.code) AS permission_codes
             FROM roles r
             LEFT JOIN role_permissions rp ON rp.role_id = r.id
             LEFT JOIN permissions p ON p.id = rp.permission_id
+            {where_sql}
             GROUP BY r.id
             ORDER BY r.id
-            """
+            """,
+            params,
         ).fetchall()
         return rows_to_dicts(rows)
 
@@ -328,16 +366,22 @@ def list_cities(user: CurrentUser = Depends(current_user)) -> list[dict]:
 
 @router.get("/stores")
 def list_stores(user: CurrentUser = Depends(current_user)) -> list[dict]:
-    ensure_admin(user)
+    ensure_user_manager(user)
+    where_sql = "s.status != 'deleted'"
+    params: tuple = ()
+    if "admin" not in user.role_codes:
+        where_sql += " AND s.id = ?"
+        params = (user.store_id,)
     with get_connection() as conn:
         rows = conn.execute(
-            """
+            f"""
             SELECT s.*, c.name AS city
             FROM stores s
             LEFT JOIN cities c ON c.id = s.city_id
-            WHERE s.status != 'deleted'
+            WHERE {where_sql}
             ORDER BY s.id
-            """
+            """,
+            params,
         ).fetchall()
         return rows_to_dicts(rows)
 
