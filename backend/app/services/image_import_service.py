@@ -341,9 +341,9 @@ def _participant_and_store_from_ocr(lines: list[str], data: dict) -> tuple[str |
 
 def _report_type_from_ocr(compact_text: str) -> str | None:
     if any(token in compact_text for token in ["房源售出", "贺报", "賀報", "维护楼盘", "维护人CA"]):
-        return "maintainor_report"
-    if any(token in compact_text for token in ["签约金额", "签约小区", "签约面积", "签约CA", "喜报", "二手成交速递"]):
         return "agent_report"
+    if any(token in compact_text for token in ["签约金额", "签约小区", "签约面积", "签约CA", "喜报", "二手成交速递"]):
+        return "maintainor_report"
     return None
 
 

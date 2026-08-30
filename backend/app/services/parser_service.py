@@ -100,11 +100,11 @@ def _date_after_labels(lines: list[str], labels: list[str]) -> str | None:
 
 def _report_type(clean_text: str) -> str:
     if "贺报" in clean_text or "賀報" in clean_text or "房源售出" in clean_text:
-        return "maintainor_report"
-    if "喜报" in clean_text or "签约金额" in clean_text or "二手成交速递" in clean_text:
         return "agent_report"
-    if "维护楼盘" in clean_text or "维护人CA" in clean_text:
+    if "喜报" in clean_text or "签约金额" in clean_text or "二手成交速递" in clean_text:
         return "maintainor_report"
+    if "维护楼盘" in clean_text or "维护人CA" in clean_text:
+        return "agent_report"
     return "unknown"
 
 
