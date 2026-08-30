@@ -344,11 +344,11 @@ def _enhance_parsed_data_from_ocr(data: dict, ocr_text: str) -> dict:
     compact = _compact_text(ocr_text)
     if data.get("report_type") in (None, "", "unknown"):
         if any(token in compact for token in ["房源售出", "贺报", "賀報"]):
-            data["report_type"] = "agent_report"
-        elif any(token in compact for token in ["签约金额", "签约小区", "签约面积", "签约CA", "喜报"]):
             data["report_type"] = "maintainor_report"
-        elif any(token in compact for token in ["维护楼盘", "维护人CA"]):
+        elif any(token in compact for token in ["签约金额", "签约小区", "签约面积", "签约CA", "喜报"]):
             data["report_type"] = "agent_report"
+        elif any(token in compact for token in ["维护楼盘", "维护人CA"]):
+            data["report_type"] = "maintainor_report"
 
     if not data.get("residential"):
         data["residential"] = _line_after_ocr_labels(lines, ["维护楼盘", "签约小区", "成交小区", "楼盘", "小区"])

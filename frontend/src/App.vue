@@ -140,8 +140,8 @@ const orderFields = [
   ['acreage', '面积', 'number'],
   ['price', '成交价', 'number'],
   ['list_price', '挂牌价', 'number'],
-  ['agent', '经纪人', 'text'],
-  ['store', '门店', 'text'],
+  ['agent', '成交人', 'text'],
+  ['store', '成交人门店', 'text'],
   ['brand', '品牌', 'text'],
   ['maintainor', '维护人', 'text'],
   ['maintainor_store', '维护人门店', 'text'],
@@ -1500,7 +1500,7 @@ watch(dutyCalendarDate, (value) => {
           <label>开始日期<input v-model="orderFilters.start_date" type="date" /></label>
           <label>结束日期<input v-model="orderFilters.end_date" type="date" /></label>
           <label>楼盘<input v-model="orderFilters.residential" placeholder="小区/楼盘" @keyup.enter="applyOrderFilters" /></label>
-          <label>经纪人<input v-model="orderFilters.agent" placeholder="成交人" @keyup.enter="applyOrderFilters" /></label>
+          <label>成交人<input v-model="orderFilters.agent" placeholder="成交人" @keyup.enter="applyOrderFilters" /></label>
           <label>区域<input v-model="orderFilters.area" placeholder="区域" @keyup.enter="applyOrderFilters" /></label>
           <label>面积下限<input v-model="orderFilters.acreage_min" type="number" min="0" placeholder="平方米" /></label>
           <label>面积上限<input v-model="orderFilters.acreage_max" type="number" min="0" placeholder="平方米" /></label>
@@ -1514,13 +1514,11 @@ watch(dutyCalendarDate, (value) => {
 
         <el-table :data="orders" border stripe class="data-table" @sort-change="handleOrderSort">
           <el-table-column prop="signing_date" label="日期" width="120" sortable="custom" />
-          <el-table-column prop="area" label="区域" width="110" />
-          <el-table-column prop="street" label="街道" width="120" />
           <el-table-column prop="residential" label="楼盘" min-width="160" />
           <el-table-column prop="acreage" label="面积" width="100" sortable="custom" />
           <el-table-column prop="price" label="成交价" width="120" sortable="custom" />
-          <el-table-column prop="agent" label="经纪人" width="120" />
-          <el-table-column prop="store" label="门店" min-width="150" />
+          <el-table-column prop="agent" label="成交人" width="120" />
+          <el-table-column prop="store" label="成交人门店" min-width="150" />
           <el-table-column label="操作" width="210" fixed="right">
             <template #default="{ row }">
               <div class="row-actions">
