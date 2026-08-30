@@ -1850,7 +1850,7 @@ watch(dutyCalendarDate, (value) => {
                 <td>{{ item.store }}</td>
                 <td>
                   <el-select
-                    v-if="isAdmin"
+                    v-if="canManageUsers"
                     v-model="item.role_codes"
                     multiple
                     collapse-tags
@@ -1862,9 +1862,9 @@ watch(dutyCalendarDate, (value) => {
                   <span v-else>{{ normalizeRoleCodes(item.role_codes).join(', ') }}</span>
                 </td>
                 <td class="row-actions">
-                  <button v-if="isAdmin" class="small secondary" @click="saveUserRoles(item)">保存</button>
+                  <button v-if="canManageUsers" class="small secondary" @click="saveUserRoles(item)">保存</button>
                   <button class="small secondary" @click="resetUserPassword(item)">重置密码</button>
-                  <button v-if="isAdmin" class="small danger" @click="deleteUser(item)">删除</button>
+                  <button v-if="canManageUsers" class="small danger" @click="deleteUser(item)">删除</button>
                 </td>
               </tr>
             </tbody>

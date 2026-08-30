@@ -191,13 +191,18 @@ def create_user(body: CreateUserRequest, user: CurrentUser = Depends(current_use
 
 @router.put("/users/{user_id}/roles")
 def update_user_roles(user_id: int, body: UpdateUserRolesRequest, user: CurrentUser = Depends(current_user)) -> dict[str, str]:
-    ensure_admin(user)
+    ensure_user_manager(user)
     with get_connection() as conn:
         exists = conn.execute("SELECT id FROM users WHERE id = ? AND status = 'active'", (user_id,)).fetchone()
         if exists is None:
             raise HTTPException(status_code=404, detail="用户不存在")
+        role_codes = body.role_codes
+        if "admin" not in user.role_codes:
+            if not _is_store_managed_user(conn, user_id, user.store_id):
+                raise HTTPException(status_code=403, detail="店长只能修改本店店员或租赁店员的角色")
+            role_codes = _ensure_store_manager_role_scope(role_codes)
         conn.execute("DELETE FROM user_roles WHERE user_id = ?", (user_id,))
-        for code in body.role_codes:
+        for code in role_codes:
             role = conn.execute("SELECT id FROM roles WHERE code = ?", (code,)).fetchone()
             if role:
                 conn.execute("INSERT OR IGNORE INTO user_roles(user_id, role_id) VALUES (?, ?)", (user_id, role["id"]))
@@ -207,10 +212,12 @@ def update_user_roles(user_id: int, body: UpdateUserRolesRequest, user: CurrentU
 
 @router.delete("/users/{user_id}")
 def delete_user(user_id: int, user: CurrentUser = Depends(current_user)) -> dict[str, str]:
-    ensure_admin(user)
+    ensure_user_manager(user)
     if user_id == user.id:
         raise HTTPException(status_code=400, detail="不能删除当前登录用户")
     with get_connection() as conn:
+        if "admin" not in user.role_codes and not _is_store_managed_user(conn, user_id, user.store_id):
+            raise HTTPException(status_code=403, detail="店长只能删除本店店员或租赁店员")
         cursor = conn.execute(
             "UPDATE users SET status = 'deleted', modify_time = CURRENT_TIMESTAMP WHERE id = ? AND status = 'active'",
             (user_id,),
