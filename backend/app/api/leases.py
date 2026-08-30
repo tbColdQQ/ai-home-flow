@@ -31,7 +31,7 @@ class LeaseRequest(BaseModel):
 
 
 def ensure_lease_manager(user: CurrentUser) -> None:
-    if not {"admin", "rental_agent"}.intersection(user.role_codes):
+    if not {"admin", "store_manager", "rental_agent", "rental_clerk"}.intersection(user.role_codes):
         raise HTTPException(status_code=403, detail="需要租赁房源管理权限")
 
 

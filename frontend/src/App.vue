@@ -106,7 +106,7 @@ const canScanImages = computed(() => user.value?.roles?.some((role) => ['admin',
 const canManageUsers = computed(() => isAdmin.value || isStoreManager.value)
 const canEditOrders = computed(() => isAdmin.value || isStoreManager.value)
 const canEditDuty = computed(() => isAdmin.value || isStoreManager.value)
-const canManageLeases = computed(() => user.value?.roles?.some((role) => ['admin', 'rental_agent'].includes(role)))
+const canManageLeases = computed(() => user.value?.roles?.some((role) => ['admin', 'store_manager', 'rental_agent', 'rental_clerk'].includes(role)))
 const canManageKnowledge = computed(() => isLoggedIn.value)
 const showDutyCalendar = false
 const hasSelectedImageFiles = computed(() => imageUploadFileList.value.some((item) => item.raw instanceof File))
