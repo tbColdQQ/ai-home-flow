@@ -97,6 +97,7 @@ const isUploadingImages = ref(false)
 const imageUploadRef = ref(null)
 const imageUploadFileList = ref([])
 const scanDetails = ref([])
+const MAX_SCAN_IMAGE_FILES = 10
 
 const isLoggedIn = computed(() => Boolean(token.value && user.value))
 const isAdmin = computed(() => user.value?.roles?.includes('admin'))
@@ -893,11 +894,18 @@ function closeScanDialog() {
 }
 
 function handleImageFileChange(_file, files) {
-  imageUploadFileList.value = files
+  imageUploadFileList.value = files.slice(0, MAX_SCAN_IMAGE_FILES)
+  if (files.length > MAX_SCAN_IMAGE_FILES) {
+    message.value = `最多只能上传 ${MAX_SCAN_IMAGE_FILES} 张图片`
+  }
 }
 
 function handleImageFileRemove(_file, files) {
   imageUploadFileList.value = files
+}
+
+function handleImageFileExceed() {
+  message.value = `最多只能上传 ${MAX_SCAN_IMAGE_FILES} 张图片`
 }
 
 function clearImageUploadFiles() {
@@ -2020,11 +2028,9 @@ watch(dutyCalendarDate, (value) => {
     <el-dialog v-model="showScanDialog" title="上传/扫描成交图片" width="560px" @closed="closeScanDialog">
       <el-form label-position="top">
         <el-form-item label="图片日期">
-          <el-date-picker
-            v-model="scanDate"
-            type="date"
-            value-format="YYYY-MM-DD"
-            placeholder="选择图片对应日期"
+          <el-input
+            :model-value="scanDate"
+            readonly
             style="width: 100%"
           />
         </el-form-item>
@@ -2035,8 +2041,10 @@ watch(dutyCalendarDate, (value) => {
             multiple
             accept=".jpg,.jpeg,.png,.bmp,.webp"
             :auto-upload="false"
+            :limit="MAX_SCAN_IMAGE_FILES"
             v-model:file-list="imageUploadFileList"
             :on-change="handleImageFileChange"
+            :on-exceed="handleImageFileExceed"
             :on-remove="handleImageFileRemove"
           >
             <div class="upload-drop-text">拖拽图片到这里，或点击选择图片</div>
