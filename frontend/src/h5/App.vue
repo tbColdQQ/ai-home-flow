@@ -41,6 +41,14 @@ const isLoadingTasks = ref(false)
 
 const isLoggedIn = computed(() => Boolean(token.value && user.value))
 const roleText = computed(() => (user.value?.roles || []).join(', '))
+const isStoreManager = computed(() => user.value?.roles?.includes('store_manager'))
+
+function canDeleteTask(task) {
+  if (!task || task.status === 'deleted') return false
+  if (isStoreManager.value && task.assignee_store_id === user.value?.store_id) return true
+  if (isStoreManager.value && task.task_store_id === user.value?.store_id) return true
+  return task.assignee_user_id === user.value?.id
+}
 
 function authHeaders() {
   return { Authorization: `Bearer ${token.value}`, 'Content-Type': 'application/json' }
@@ -634,7 +642,7 @@ onBeforeUnmount(() => {
               <p>{{ taskDescription(task) }}</p>
               <span>创建时间：{{ task.create_time || '-' }}</span>
               <el-button size="small" type="primary" @click="acknowledgeTask(task)">已知悉</el-button>
-              <el-button size="small" type="danger" @click="deleteTask(task)">删除</el-button>
+              <el-button v-if="canDeleteTask(task)" size="small" type="danger" @click="deleteTask(task)">删除</el-button>
             </article>
             <el-empty v-if="!isLoadingTasks && !pendingTasks.length" description="暂无待办" />
           </el-tab-pane>
@@ -648,7 +656,7 @@ onBeforeUnmount(() => {
               <span>处理人：{{ task.handler_name || '-' }}</span>
               <span>创建时间：{{ task.create_time || '-' }}</span>
               <span>完成时间：{{ task.finish_time || '-' }}</span>
-              <el-button size="small" type="danger" @click="deleteTask(task)">删除</el-button>
+              <el-button v-if="canDeleteTask(task)" size="small" type="danger" @click="deleteTask(task)">删除</el-button>
             </article>
             <el-empty v-if="!isLoadingTasks && !doneTasks.length" description="暂无已办" />
           </el-tab-pane>

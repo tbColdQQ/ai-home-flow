@@ -13,6 +13,7 @@ from app.services.image_import_service import IMAGE_EXTENSIONS, scan_images
 
 
 router = APIRouter()
+MAX_IMAGE_UPLOAD_FILES = 10
 
 
 class ScanImagesRequest(BaseModel):
@@ -20,7 +21,7 @@ class ScanImagesRequest(BaseModel):
 
 
 def _ensure_image_permission(user: CurrentUser) -> None:
-    if not {"store_manager", "admin"}.intersection(user.role_codes):
+    if not {"store_manager", "admin", "clerk_admin"}.intersection(user.role_codes):
         raise HTTPException(status_code=403, detail="无权操作成交图片")
 
 
@@ -57,6 +58,8 @@ async def upload_images(
     business_date = _validate_business_date(business_date)
     if not files:
         raise HTTPException(status_code=400, detail="请选择要上传的图片")
+    if len(files) > MAX_IMAGE_UPLOAD_FILES:
+        raise HTTPException(status_code=400, detail=f"最多只能上传 {MAX_IMAGE_UPLOAD_FILES} 张图片")
 
     target_dir = settings.image_root / user.city / business_date
     target_dir.mkdir(parents=True, exist_ok=True)

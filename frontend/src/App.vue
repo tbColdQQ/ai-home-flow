@@ -104,10 +104,12 @@ const MAX_SCAN_IMAGE_FILES = 10
 const isLoggedIn = computed(() => Boolean(token.value && user.value))
 const isAdmin = computed(() => user.value?.roles?.includes('admin'))
 const isStoreManager = computed(() => user.value?.roles?.includes('store_manager'))
-const canHandleTasks = computed(() => user.value?.roles?.some((role) => ['admin', 'store_manager', 'rental_agent', 'rental_clerk'].includes(role)))
-const canScanImages = computed(() => user.value?.roles?.some((role) => ['admin', 'store_manager'].includes(role)))
+const isClerkAdmin = computed(() => user.value?.roles?.includes('clerk_admin'))
+const canHandleTasks = computed(() => user.value?.roles?.some((role) => ['admin', 'store_manager', 'clerk_admin', 'rental_agent', 'rental_clerk'].includes(role)))
+const canScanImages = computed(() => user.value?.roles?.some((role) => ['admin', 'store_manager', 'clerk_admin'].includes(role)))
 const canManageUsers = computed(() => isAdmin.value || isStoreManager.value)
 const canEditOrders = computed(() => isAdmin.value || isStoreManager.value)
+const canDeleteOrders = computed(() => isStoreManager.value || isClerkAdmin.value)
 const canEditDuty = computed(() => isAdmin.value || isStoreManager.value)
 const canManageLeases = computed(() => user.value?.roles?.some((role) => ['admin', 'store_manager', 'rental_agent', 'rental_clerk'].includes(role)))
 const canManageKnowledge = computed(() => isLoggedIn.value)
@@ -770,6 +772,11 @@ function imageTaskValue(payload, key) {
   return value === null || value === undefined || value === '' ? '未识别' : value
 }
 
+function scanResultValue(row, key) {
+  const value = row?.parsed?.[key]
+  return value === null || value === undefined || value === '' ? '-' : value
+}
+
 function imageTaskMissingLabels(task) {
   const reason = String(task?.reason || '')
   const payload = imageTaskPayload(task)
@@ -805,8 +812,11 @@ function taskSourceText(task) {
   return imageTaskSummary(task)
 }
 
-function canDeleteDoneTask(task) {
-  return task?.status === 'done' && (task?.handler_user_id === user.value?.id || isAdmin.value)
+function canDeleteTask(task) {
+  if (!task || task.status === 'deleted') return false
+  if (isStoreManager.value && task.assignee_store_id === user.value?.store_id) return true
+  if (isStoreManager.value && task.task_store_id === user.value?.store_id) return true
+  return task.assignee_user_id === user.value?.id
 }
 
 async function addLeaseFollowup(task) {
@@ -1523,11 +1533,11 @@ watch(dutyCalendarDate, (value) => {
                   <el-button v-if="!isLeaseTask(row) && canScanImages" size="small" @click="openTask(row)">修改/确认</el-button>
                   <el-button v-if="!isOrderConfirmTask(row)" size="small" @click="acknowledgeTask(row)">已知悉</el-button>
                   <el-button v-if="isLeaseTask(row) && row.followup_count > 0" size="small" type="danger" @click="suppressLeaseTask(row)">不再提示</el-button>
-                  <el-button size="small" type="danger" @click="deleteTask(row)">删除</el-button>
+                  <el-button v-if="canDeleteTask(row)" size="small" type="danger" @click="deleteTask(row)">删除</el-button>
                 </div>
                 <div v-else class="row-actions">
                   <el-button size="small" @click="openTask(row)">查看</el-button>
-                  <el-button v-if="canDeleteDoneTask(row)" size="small" type="danger" @click="deleteTask(row)">删除</el-button>
+                  <el-button v-if="canDeleteTask(row)" size="small" type="danger" @click="deleteTask(row)">删除</el-button>
                 </div>
               </template>
             </el-table-column>
@@ -1615,7 +1625,7 @@ watch(dutyCalendarDate, (value) => {
               <div class="row-actions">
                 <el-button size="small" @click="openOrder(row)">详情</el-button>
                 <el-button v-if="canEditOrders" size="small" @click="openOrder(row, 'edit')">修改</el-button>
-                <el-button v-if="canEditOrders" size="small" type="danger" @click="deleteOrder(row)">删除</el-button>
+                <el-button v-if="canDeleteOrders" size="small" type="danger" @click="deleteOrder(row)">删除</el-button>
               </div>
             </template>
           </el-table-column>
@@ -1873,11 +1883,11 @@ watch(dutyCalendarDate, (value) => {
                 <el-button v-if="!isLeaseTask(row) && canScanImages" size="small" @click="openTask(row)">修改/确认</el-button>
                 <el-button v-if="!isOrderConfirmTask(row)" size="small" @click="acknowledgeTask(row)">已知悉</el-button>
                 <el-button v-if="isLeaseTask(row) && row.followup_count > 0" size="small" type="danger" @click="suppressLeaseTask(row)">不再提示</el-button>
-                <el-button size="small" type="danger" @click="deleteTask(row)">删除</el-button>
+                <el-button v-if="canDeleteTask(row)" size="small" type="danger" @click="deleteTask(row)">删除</el-button>
               </div>
               <div v-else class="row-actions">
                 <el-button size="small" @click="openTask(row)">查看</el-button>
-                <el-button v-if="canDeleteDoneTask(row)" size="small" type="danger" @click="deleteTask(row)">删除</el-button>
+                <el-button v-if="canDeleteTask(row)" size="small" type="danger" @click="deleteTask(row)">删除</el-button>
               </div>
             </template>
           </el-table-column>
@@ -2096,11 +2106,29 @@ watch(dutyCalendarDate, (value) => {
       </template>
     </el-dialog>
 
-    <el-dialog v-model="showScanResultDialog" title="扫描结果" width="720px" @closed="closeScanResultDialog">
+    <el-dialog v-model="showScanResultDialog" title="扫描结果" width="1100px" @closed="closeScanResultDialog">
       <section class="scan-result-section">
         <h3>新增成交记录</h3>
         <el-table v-if="newScanOrderResults.length" :data="newScanOrderResults" border stripe size="small">
           <el-table-column prop="file_name" label="图片名称" min-width="180" />
+          <el-table-column label="小区名" min-width="150">
+            <template #default="{ row }">{{ scanResultValue(row, 'residential') }}</template>
+          </el-table-column>
+          <el-table-column label="成交日期" width="120">
+            <template #default="{ row }">{{ scanResultValue(row, 'signing_date') }}</template>
+          </el-table-column>
+          <el-table-column label="成交人" width="110">
+            <template #default="{ row }">{{ scanResultValue(row, 'agent') }}</template>
+          </el-table-column>
+          <el-table-column label="维护人" width="110">
+            <template #default="{ row }">{{ scanResultValue(row, 'maintainor') }}</template>
+          </el-table-column>
+          <el-table-column label="成交面积" width="110">
+            <template #default="{ row }">{{ scanResultValue(row, 'acreage') }}</template>
+          </el-table-column>
+          <el-table-column label="成交价" width="120">
+            <template #default="{ row }">{{ scanResultValue(row, 'price') }}</template>
+          </el-table-column>
           <el-table-column label="成交ID" width="100">
             <template #default="{ row }">{{ row.order_id || '-' }}</template>
           </el-table-column>
@@ -2113,6 +2141,24 @@ watch(dutyCalendarDate, (value) => {
         <h3>需人工审核</h3>
         <el-table v-if="reviewScanResults.length" :data="reviewScanResults" border stripe size="small">
           <el-table-column prop="file_name" label="图片名称" min-width="180" />
+          <el-table-column label="小区名" min-width="150">
+            <template #default="{ row }">{{ scanResultValue(row, 'residential') }}</template>
+          </el-table-column>
+          <el-table-column label="成交日期" width="120">
+            <template #default="{ row }">{{ scanResultValue(row, 'signing_date') }}</template>
+          </el-table-column>
+          <el-table-column label="成交人" width="110">
+            <template #default="{ row }">{{ scanResultValue(row, 'agent') }}</template>
+          </el-table-column>
+          <el-table-column label="维护人" width="110">
+            <template #default="{ row }">{{ scanResultValue(row, 'maintainor') }}</template>
+          </el-table-column>
+          <el-table-column label="成交面积" width="110">
+            <template #default="{ row }">{{ scanResultValue(row, 'acreage') }}</template>
+          </el-table-column>
+          <el-table-column label="成交价" width="120">
+            <template #default="{ row }">{{ scanResultValue(row, 'price') }}</template>
+          </el-table-column>
           <el-table-column label="状态" width="100">
             <template #default="{ row }">
               <el-tag :type="row.status === 'failed' ? 'danger' : 'warning'" effect="plain">
@@ -2236,7 +2282,7 @@ watch(dutyCalendarDate, (value) => {
         <div class="actions">
           <button v-if="orderDialogMode === 'detail' && canEditOrders" @click="orderDialogMode = 'edit'">修改</button>
           <button v-if="orderDialogMode === 'edit'" @click="saveOrder">保存</button>
-          <button v-if="canEditOrders" class="danger" @click="deleteOrder(selectedOrder)">删除</button>
+          <button v-if="canDeleteOrders" class="danger" @click="deleteOrder(selectedOrder)">删除</button>
         </div>
       </section>
     </div>
@@ -2270,11 +2316,11 @@ watch(dutyCalendarDate, (value) => {
         <div v-if="canEditTask(selectedTask) && isLeaseTask(selectedTask)" class="actions">
           <button class="secondary" @click="saveTaskDraft">保存修改</button>
           <button @click="completeTask">确认入库</button>
-          <button class="danger" @click="deleteTask()">删除待办</button>
+          <button v-if="canDeleteTask(selectedTask)" class="danger" @click="deleteTask()">删除待办</button>
         </div>
         <div v-else-if="canEditTask(selectedTask)" class="actions">
           <button @click="openTaskOrder(selectedTask)">去成交列表修改</button>
-          <button class="danger" @click="deleteTask()">删除待办</button>
+          <button v-if="canDeleteTask(selectedTask)" class="danger" @click="deleteTask()">删除待办</button>
         </div>
       </section>
     </div>

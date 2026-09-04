@@ -34,7 +34,7 @@ class LeaseFollowupRequest(BaseModel):
 
 
 def ensure_image_task_handler(user: CurrentUser) -> None:
-    if not {"store_manager", "admin"}.intersection(user.role_codes):
+    if not {"store_manager", "admin", "clerk_admin"}.intersection(user.role_codes):
         raise HTTPException(status_code=403, detail="无权处理成交图片待办")
 
 
@@ -43,6 +43,7 @@ def _task_select_sql() -> str:
         SELECT t.*, si.file_path, si.file_name, si.ocr_text, si.business_date,
                lp.community_name, lp.address, lp.lease_expire_date,
                au.store_id AS assignee_store_id,
+               ts.id AS task_store_id,
                au.display_name AS assignee_name,
                hu.id AS handler_user_id,
                hu.display_name AS handler_name,
@@ -51,6 +52,8 @@ def _task_select_sql() -> str:
         LEFT JOIN source_images si ON si.id = t.source_id AND t.source_type = 'image'
         LEFT JOIN lease_properties lp ON lp.id = t.source_id AND t.source_type = 'lease'
         LEFT JOIN users au ON au.id = t.assignee_user_id
+        LEFT JOIN cities tc ON tc.name = t.city
+        LEFT JOIN stores ts ON ts.city_id = tc.id AND ts.name = t.store
         LEFT JOIN lease_task_followups lf ON lf.task_id = t.id
         LEFT JOIN task_logs hlog ON hlog.id = (
             SELECT tl.id
@@ -83,11 +86,23 @@ def ensure_task_access(task: dict, user: CurrentUser) -> None:
         return
     if "store_manager" in user.role_codes and task.get("assignee_store_id") == user.store_id:
         return
+    if "store_manager" in user.role_codes and task.get("task_store_id") == user.store_id:
+        return
     if task.get("assignee_user_id") == user.id:
         return
     if task.get("task_type") != "lease_expiry" and task.get("city") == user.city and "store_manager" in user.role_codes:
         return
     raise HTTPException(status_code=403, detail="无权查看或处理该待办")
+
+
+def ensure_task_delete_access(task: dict, user: CurrentUser) -> None:
+    if "store_manager" in user.role_codes and task.get("assignee_store_id") == user.store_id:
+        return
+    if "store_manager" in user.role_codes and task.get("task_store_id") == user.store_id:
+        return
+    if task.get("assignee_user_id") == user.id:
+        return
+    raise HTTPException(status_code=403, detail="只能删除自己负责的待办，店长可以删除本店待办")
 
 
 @router.get("")
@@ -279,11 +294,9 @@ def suppress_task(task_id: int, user: CurrentUser = Depends(current_user)) -> di
 def delete_task(task_id: int, user: CurrentUser = Depends(current_user)) -> dict[str, str]:
     with get_connection() as conn:
         task = _load_task(conn, task_id)
-        ensure_task_access(task, user)
+        ensure_task_delete_access(task, user)
         if task.get("status") == "deleted":
             raise HTTPException(status_code=400, detail="待办已删除")
-        if task.get("status") == "done" and task.get("handler_user_id") != user.id and "admin" not in user.role_codes:
-            raise HTTPException(status_code=403, detail="只有处理人可以删除已办")
         action = "delete_done" if task.get("status") == "done" else "delete"
         conn.execute("UPDATE task_items SET status = 'deleted', finish_time = CURRENT_TIMESTAMP WHERE id = ?", (task_id,))
         conn.execute(

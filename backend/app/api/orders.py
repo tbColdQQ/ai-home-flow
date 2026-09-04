@@ -34,7 +34,12 @@ class UpdateOrderRequest(BaseModel):
 
 def ensure_order_editor(user: CurrentUser) -> None:
     if not {"admin", "store_manager"}.intersection(user.role_codes):
-        raise HTTPException(status_code=403, detail="只有店长和管理员可以修改或删除成交数据")
+        raise HTTPException(status_code=403, detail="只有店长和管理员可以修改成交数据")
+
+
+def ensure_order_deleter(user: CurrentUser) -> None:
+    if not {"store_manager", "clerk_admin"}.intersection(user.role_codes):
+        raise HTTPException(status_code=403, detail="只有店长和行政可以删除成交数据")
 
 
 @router.get("")
@@ -107,7 +112,7 @@ def edit_order(order_id: int, body: UpdateOrderRequest, user: CurrentUser = Depe
 
 @router.delete("/{order_id}")
 def delete_order(order_id: int, user: CurrentUser = Depends(current_user)) -> dict[str, str]:
-    ensure_order_editor(user)
+    ensure_order_deleter(user)
     with get_connection() as conn:
         if not cancel_order(conn, user.city, order_id, user.username):
             raise HTTPException(status_code=404, detail="成交记录不存在")

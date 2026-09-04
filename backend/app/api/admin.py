@@ -10,7 +10,7 @@ from app.services.auth_service import CurrentUser, hash_password
 
 router = APIRouter()
 STORE_MANAGER_ROLE_CODES = {"clerk", "rental_clerk"}
-STORE_MANAGER_FORBIDDEN_ROLE_CODES = {"admin", "store_manager", "rental_agent"}
+STORE_MANAGER_FORBIDDEN_ROLE_CODES = {"admin", "store_manager", "rental_agent", "clerk_admin"}
 
 
 class CreateUserRequest(BaseModel):
@@ -72,7 +72,7 @@ def _is_store_managed_user(conn, target_user_id: int, store_id: int | None) -> b
           AND u.status = 'active'
         GROUP BY u.id
         HAVING SUM(CASE WHEN r.code IN ('clerk', 'rental_clerk') THEN 1 ELSE 0 END) > 0
-           AND SUM(CASE WHEN r.code IN ('admin', 'store_manager', 'rental_agent') THEN 1 ELSE 0 END) = 0
+          AND SUM(CASE WHEN r.code IN ('admin', 'store_manager', 'rental_agent', 'clerk_admin') THEN 1 ELSE 0 END) = 0
         """,
         (target_user_id, store_id),
     ).fetchone()
