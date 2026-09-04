@@ -279,14 +279,16 @@ def suppress_task(task_id: int, user: CurrentUser = Depends(current_user)) -> di
 def delete_task(task_id: int, user: CurrentUser = Depends(current_user)) -> dict[str, str]:
     with get_connection() as conn:
         task = _load_task(conn, task_id)
-        if task.get("status") != "done":
-            raise HTTPException(status_code=400, detail="只能删除已办")
-        if task.get("handler_user_id") != user.id:
+        ensure_task_access(task, user)
+        if task.get("status") == "deleted":
+            raise HTTPException(status_code=400, detail="待办已删除")
+        if task.get("status") == "done" and task.get("handler_user_id") != user.id and "admin" not in user.role_codes:
             raise HTTPException(status_code=403, detail="只有处理人可以删除已办")
-        conn.execute("UPDATE task_items SET status = 'deleted' WHERE id = ?", (task_id,))
+        action = "delete_done" if task.get("status") == "done" else "delete"
+        conn.execute("UPDATE task_items SET status = 'deleted', finish_time = CURRENT_TIMESTAMP WHERE id = ?", (task_id,))
         conn.execute(
-            "INSERT INTO task_logs(task_id, action, operator_user_id) VALUES (?, 'delete_done', ?)",
-            (task_id, user.id),
+            "INSERT INTO task_logs(task_id, action, operator_user_id) VALUES (?, ?, ?)",
+            (task_id, action, user.id),
         )
         conn.commit()
     return {"message": "deleted"}

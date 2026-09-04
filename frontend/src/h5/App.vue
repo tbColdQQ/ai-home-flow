@@ -433,6 +433,18 @@ async function acknowledgeTask(task) {
   }
 }
 
+async function deleteTask(task) {
+  if (!task) return
+  if (!window.confirm(`确认删除待办 ${task.title || task.id}？`)) return
+  try {
+    await api(`/api/tasks/${task.id}`, { method: 'DELETE' })
+    message.value = '待办已删除'
+    await loadTasks()
+  } catch (error) {
+    message.value = error.message
+  }
+}
+
 function switchTab(name) {
   activeTab.value = name
   if (name === 'knowledge') loadKnowledge()
@@ -622,6 +634,7 @@ onBeforeUnmount(() => {
               <p>{{ taskDescription(task) }}</p>
               <span>创建时间：{{ task.create_time || '-' }}</span>
               <el-button size="small" type="primary" @click="acknowledgeTask(task)">已知悉</el-button>
+              <el-button size="small" type="danger" @click="deleteTask(task)">删除</el-button>
             </article>
             <el-empty v-if="!isLoadingTasks && !pendingTasks.length" description="暂无待办" />
           </el-tab-pane>
@@ -635,6 +648,7 @@ onBeforeUnmount(() => {
               <span>处理人：{{ task.handler_name || '-' }}</span>
               <span>创建时间：{{ task.create_time || '-' }}</span>
               <span>完成时间：{{ task.finish_time || '-' }}</span>
+              <el-button size="small" type="danger" @click="deleteTask(task)">删除</el-button>
             </article>
             <el-empty v-if="!isLoadingTasks && !doneTasks.length" description="暂无已办" />
           </el-tab-pane>

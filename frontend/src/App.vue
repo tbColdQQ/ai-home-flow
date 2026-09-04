@@ -802,7 +802,7 @@ function taskSourceText(task) {
 }
 
 function canDeleteDoneTask(task) {
-  return task?.status === 'done' && task?.handler_user_id === user.value?.id
+  return task?.status === 'done' && (task?.handler_user_id === user.value?.id || isAdmin.value)
 }
 
 async function addLeaseFollowup(task) {
@@ -1504,16 +1504,18 @@ watch(dutyCalendarDate, (value) => {
             <el-table-column prop="handler_name" label="处理人" width="120" />
             <el-table-column prop="create_time" label="创建时间" width="170" />
             <el-table-column prop="finish_time" label="处理时间" width="170" />
-            <el-table-column label="操作" width="260" fixed="right">
+            <el-table-column label="操作" width="320" fixed="right">
               <template #default="{ row }">
                 <div v-if="row.status === 'pending'" class="row-actions">
                   <el-button v-if="isLeaseTask(row)" size="small" @click="addLeaseFollowup(row)">添加回访</el-button>
                   <el-button v-if="!isLeaseTask(row) && canScanImages" size="small" @click="openTask(row)">修改/确认</el-button>
                   <el-button v-if="!isOrderConfirmTask(row)" size="small" @click="acknowledgeTask(row)">已知悉</el-button>
                   <el-button v-if="isLeaseTask(row) && row.followup_count > 0" size="small" type="danger" @click="suppressLeaseTask(row)">不再提示</el-button>
+                  <el-button size="small" type="danger" @click="deleteTask(row)">删除</el-button>
                 </div>
                 <div v-else class="row-actions">
                   <el-button size="small" @click="openTask(row)">查看</el-button>
+                  <el-button v-if="canDeleteDoneTask(row)" size="small" type="danger" @click="deleteTask(row)">删除</el-button>
                 </div>
               </template>
             </el-table-column>
@@ -1570,9 +1572,6 @@ watch(dutyCalendarDate, (value) => {
           <h2>成交数据</h2>
           <div>
             <input ref="excelInputRef" class="hidden-input" type="file" accept=".xlsx" @change="uploadExcel" />
-            <button v-if="isAdmin" :disabled="importing" @click="chooseExcel">
-              {{ importing ? '导入中...' : '导入成交数据' }}
-            </button>
           </div>
         </div>
 
@@ -1855,16 +1854,18 @@ watch(dutyCalendarDate, (value) => {
           <el-table-column prop="handler_name" label="处理人" width="120" />
           <el-table-column prop="create_time" label="创建时间" width="170" />
           <el-table-column prop="finish_time" label="处理时间" width="170" />
-          <el-table-column label="操作" width="260" fixed="right">
+          <el-table-column label="操作" width="320" fixed="right">
             <template #default="{ row }">
               <div v-if="row.status === 'pending'" class="row-actions">
                 <el-button v-if="isLeaseTask(row)" size="small" @click="addLeaseFollowup(row)">添加回访</el-button>
                 <el-button v-if="!isLeaseTask(row) && canScanImages" size="small" @click="openTask(row)">修改/确认</el-button>
                 <el-button v-if="!isOrderConfirmTask(row)" size="small" @click="acknowledgeTask(row)">已知悉</el-button>
                 <el-button v-if="isLeaseTask(row) && row.followup_count > 0" size="small" type="danger" @click="suppressLeaseTask(row)">不再提示</el-button>
+                <el-button size="small" type="danger" @click="deleteTask(row)">删除</el-button>
               </div>
               <div v-else class="row-actions">
                 <el-button size="small" @click="openTask(row)">查看</el-button>
+                <el-button v-if="canDeleteDoneTask(row)" size="small" type="danger" @click="deleteTask(row)">删除</el-button>
               </div>
             </template>
           </el-table-column>
