@@ -97,6 +97,8 @@ const isUploadingImages = ref(false)
 const imageUploadRef = ref(null)
 const imageUploadFileList = ref([])
 const scanDetails = ref([])
+const scanResultDetails = ref([])
+const showScanResultDialog = ref(false)
 const MAX_SCAN_IMAGE_FILES = 10
 
 const isLoggedIn = computed(() => Boolean(token.value && user.value))
@@ -111,6 +113,8 @@ const canManageLeases = computed(() => user.value?.roles?.some((role) => ['admin
 const canManageKnowledge = computed(() => isLoggedIn.value)
 const showDutyCalendar = false
 const hasSelectedImageFiles = computed(() => imageUploadFileList.value.some((item) => item.raw instanceof File))
+const newScanOrderResults = computed(() => scanResultDetails.value.filter((item) => item.status === 'confirmed'))
+const reviewScanResults = computed(() => scanResultDetails.value.filter((item) => ['pending', 'failed'].includes(item.status)))
 const totalPages = computed(() => Math.max(1, Math.ceil(orderTotal.value / orderPageSize.value)))
 const leaseTotalPages = computed(() => Math.max(1, Math.ceil(leaseTotal.value / leasePageSize.value)))
 const todayText = computed(() => formatDate(new Date()))
@@ -893,6 +897,11 @@ function closeScanDialog() {
   clearImageUploadFiles()
 }
 
+function closeScanResultDialog() {
+  showScanResultDialog.value = false
+  scanResultDetails.value = []
+}
+
 function handleImageFileChange(_file, files) {
   imageUploadFileList.value = files.slice(0, MAX_SCAN_IMAGE_FILES)
   if (files.length > MAX_SCAN_IMAGE_FILES) {
@@ -952,7 +961,10 @@ async function uploadImages(scanAfterUpload = false) {
     if (data.scan) {
       const scan = data.scan
       scanDetails.value = scan.details || []
+      scanResultDetails.value = scanDetails.value
       message.value = `上传 ${data.uploaded} 张并扫描完成：入库 ${scan.confirmed} 条，合并 ${scan.merged ?? 0} 条，待确认 ${scan.pending} 条，跳过 ${scan.skipped} 张，失败 ${scan.failed} 张`
+      showScanDialog.value = false
+      showScanResultDialog.value = true
       await loadAll()
     } else {
       scanDetails.value = []
@@ -2081,6 +2093,43 @@ watch(dutyCalendarDate, (value) => {
         >
           上传并扫描
         </el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="showScanResultDialog" title="扫描结果" width="720px" @closed="closeScanResultDialog">
+      <section class="scan-result-section">
+        <h3>新增成交记录</h3>
+        <el-table v-if="newScanOrderResults.length" :data="newScanOrderResults" border stripe size="small">
+          <el-table-column prop="file_name" label="图片名称" min-width="180" />
+          <el-table-column label="成交ID" width="100">
+            <template #default="{ row }">{{ row.order_id || '-' }}</template>
+          </el-table-column>
+          <el-table-column prop="message" label="处理结果" min-width="220" />
+        </el-table>
+        <el-empty v-else description="暂无新增成交记录" />
+      </section>
+
+      <section class="scan-result-section">
+        <h3>需人工审核</h3>
+        <el-table v-if="reviewScanResults.length" :data="reviewScanResults" border stripe size="small">
+          <el-table-column prop="file_name" label="图片名称" min-width="180" />
+          <el-table-column label="状态" width="100">
+            <template #default="{ row }">
+              <el-tag :type="row.status === 'failed' ? 'danger' : 'warning'" effect="plain">
+                {{ row.status === 'failed' ? '识别失败' : '待审核' }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="message" label="问题说明" min-width="260" />
+          <el-table-column label="成交ID" width="100">
+            <template #default="{ row }">{{ row.order_id || '-' }}</template>
+          </el-table-column>
+        </el-table>
+        <el-empty v-else description="暂无需人工审核图片" />
+      </section>
+
+      <template #footer>
+        <el-button type="primary" @click="closeScanResultDialog">知道了</el-button>
       </template>
     </el-dialog>
 
